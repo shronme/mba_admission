@@ -1,248 +1,261 @@
-# AI Admissions Operating System – Combined Product Specification
+# AI Admissions Platform -- Product Requirements Document (PRD)
 
-## 1. Executive Summary
-This product is an AI-native admissions operating system that digitizes and scales the full workflow of admissions consulting (MBA, graduate, and undergraduate), combining structured reasoning, persistent memory, and LLM-powered narrative generation.
+## 1. Overview
 
-It replaces fragmented workflows (email, docs, calls) with a unified system that:
-- Structures candidate data
-- Chooses strategy (upgrade / pivot / hybrid)
-- Generates narratives and essay guidance
-- Tracks execution over time
-- Integrates optional human consultants
+### 1.1 Product Vision
 
----
+Build an AI-native admissions operating system that replaces traditional
+admissions consulting workflows with a persistent, intelligent, and
+structured platform.
 
-## 2. Vision
-Build a persistent, intelligent system that:
-- Understands candidates deeply
-- Adapts to each school’s expectations
-- Maintains continuity over time
-- Produces high-quality, personalized application strategies
+### 1.2 Goals
 
----
+-   Replace fragmented consulting workflows (email, docs, calls)
+-   Provide structured candidate intelligence
+-   Enable scalable, high-quality admissions guidance
+-   Combine AI-first experience with optional human consultants
 
-## 3. Problem
-Applicants struggle with:
-- Translating experience into compelling narratives
-- Understanding school-specific expectations
-- Structuring essays
-- Maintaining coherent strategy
+------------------------------------------------------------------------
 
-Consultants solve this manually at high cost.
+## 2. Target Users
 
----
+### 2.1 Graduate Applicants
+
+-   MBA, Master's, LLM candidates
+-   Short-cycle (3--12 months)
+-   Need positioning, strategy, execution
+
+### 2.2 Undergraduate Applicants
+
+-   Students + families
+-   Long-cycle (3--5 years)
+-   Need development, direction, profile building
+
+------------------------------------------------------------------------
+
+## 3. Core Problem
+
+Current admissions consulting is: - Unstructured - Non-scalable -
+Dependent on human memory - Lacks continuity and data reuse
+
+------------------------------------------------------------------------
 
 ## 4. Solution
-An AI platform that:
-1. Ingests candidate data (CV, story, goals)
-2. Structures and diagnoses the profile
-3. Maps candidate to schools
-4. Generates strategy and narrative
-5. Guides execution (essays, tasks, iterations)
 
----
+A unified platform that: - Structures candidate data - Drives strategy
+decisions - Guides execution - Maintains persistent memory - Integrates
+AI + human consultants
 
-## 5. Core Product Insight
-The product is NOT:
-- A chatbot
-- An essay generator
+------------------------------------------------------------------------
 
-It IS:
-- A system that structures, reasons, decides, and remembers
+## 5. Core User Flows
 
-Core functions:
-- Structuring chaos
-- Making decisions
-- Driving execution
-- Maintaining memory
+### 5.1 Graduate Flow
 
----
+1.  Input (CV, transcripts, goals)
+2.  AI structuring
+3.  Diagnosis
+4.  Strategy selection (Upgrade / Pivot / Hybrid)
+5.  School research
+6.  Narrative creation
+7.  Execution (essays, applications)
+8.  Iteration
 
-## 6. User Segments
-### Graduate (MBA / Masters)
-- Short cycle (3–12 months)
-- Strategy-heavy
-- Narrative positioning
+### 5.2 Undergraduate Flow
 
-### Undergraduate
-- Long cycle (3–5 years)
-- Development-focused
-- Activity + profile building
+1.  Baseline assessment
+2.  Exploration
+3.  Filtering
+4.  Direction building
+5.  Activity tracking
+6.  Spike development
+7.  Monitoring
+8.  Final positioning
+9.  Execution
 
----
+------------------------------------------------------------------------
 
-## 7. User Flow
+## 6. Core Features
 
-### Step 1: Input
-- CV / resume
-- Life story
-- Goals
+### 6.1 Chat Interface
 
-### Step 2: School Selection
-- Select schools
-- System loads profiles
+-   Primary interaction layer
+-   Accepts questions, uploads, commands
+-   Drives all workflows
 
-### Step 3: AI Processing
-- Candidate analysis
-- School analysis
-- Strategy generation
+### 6.2 Candidate Profile Engine
 
-### Step 4: Output
-- Narrative strategy
-- Essay themes
-- Outline
+-   Structured representation of user
+-   Stores:
+    -   academics
+    -   experience
+    -   activities
+    -   strengths/weaknesses
+    -   narrative
+    -   strategy
 
-### Step 5: Iteration
-- User refines inputs
-- System updates outputs
+### 6.3 Strategy Engine
 
----
+-   Determines:
+    -   Upgrade / Pivot / Hybrid
+    -   School fit
+    -   Risk level
+-   Explains reasoning
 
-## 8. Consultant Workflow (Modeled by AI)
+### 6.4 Task Engine
 
-### Graduate Flow
-dump → structure → diagnose → research → strategy → narrative → execute → iterate
+-   Converts strategy into actions
+-   Tracks progress
 
-### Undergraduate Flow
-assess → explore → filter → build → spike → monitor → position → execute
+### 6.5 Essay Review Engine
 
----
+-   Suggests improvements
+-   Edits clarity and structure
+-   Does NOT fully generate essays
 
-## 9. System Architecture
+### 6.6 Research Engine
 
-### Core Components
-- Candidate Analyzer
-- School Profiler
-- Strategy Engine
-- Narrative Builder (DSPy)
-- Essay Engine
-- Task Engine
-- Profile Engine
-- Storage Layer
-- Orchestration Layer
+-   Program and school insights
+-   Candidate-specific recommendations
 
----
+### 6.7 Repository
 
-## 10. AI Pipeline
+-   Stores:
+    -   CVs
+    -   essays
+    -   transcripts
+    -   documents
 
-### Candidate Analyzer
-Outputs structured profile:
-- Career arc
-- Leadership
-- Impact
-- Risks
+### 6.8 Log System
 
-### School Profiler
-Extracts:
-- Values
-- Essay prompts
-- Fit signals
+-   Tracks:
+    -   decisions
+    -   conversations
+    -   revisions
 
-### Narrative Builder (DSPy)
-Generates:
-- Core arc
-- Themes
-- Risks
-- Evidence mapping
+### 6.9 Consultant Mode
 
-### Essay Engine
-- Outline generation
-- Draft review
-- Iterative refinement
+-   Human consultant access
+-   Shared context with AI
 
----
+------------------------------------------------------------------------
 
-## 11. DSPy Optimization
-- Few-shot learning using 30–40 accepted cases
-- BootstrapFewShot → MIPROv2
-- Dataset includes candidate + strategy + outcome
+## 7. Functional Requirements
 
----
+### 7.1 Intake
 
-## 12. UX Design
+-   Upload documents
+-   Free-text input
+-   Multi-language support
 
-### Core Pillars
-- Chat (main interface)
-- Log (history + decisions)
-- Repository (documents)
+### 7.2 Profile Structuring
 
-### Supporting
-- Profile state
-- Tasks
-- Research
+-   Extract structured data
+-   Normalize inputs
+-   Identify gaps
 
----
+### 7.3 Strategy Recommendation
 
-## 13. Engagement Loop
-chat → analyze → store → update → generate tasks → repeat
+-   Provide explicit strategy type
+-   Justify decisions
 
----
+### 7.4 Task Generation
 
-## 14. Data Model (Simplified)
+-   Actionable next steps
+-   Prioritized
 
-Candidate:
-- profile_data
-- academics
-- activities
-- narrative
-- strategy
-- schools
-- tasks
-- essays
-- history
+### 7.5 Essay Review
 
----
+-   Feedback loops
+-   Version comparison
 
-## 15. Pricing
+### 7.6 Research
 
-Graduate:
-- AI: $100
-- Consultant: $2000
+-   Query schools
+-   Provide comparisons
 
-Undergraduate:
-- AI: $1000/year
-- Consultant: $5000/year
+### 7.7 Memory
 
----
+-   Persist all interactions
+-   Enable context recall
 
-## 16. Evaluation Metrics
-- School fit
-- Specificity
-- Coherence
-- Differentiation
-- Grounding
+------------------------------------------------------------------------
 
----
+## 8. Non-Functional Requirements
 
-## 17. Risks
-- Generic outputs
-- Data quality issues
-- Over-automation
-- Trust vs AI
+-   High availability
+-   Data privacy (PII handling)
+-   Low latency AI responses
+-   Scalable architecture
+-   Multilingual support
 
----
+------------------------------------------------------------------------
 
-## 18. Strategic Positioning
-This is:
-A persistent, intelligent admissions operating system
+## 9. System Architecture (High Level)
 
-Differentiators:
-- Structured memory
-- Decision logic
-- Workflow continuity
-- AI + human hybrid
+User → Chat → Orchestration Layer → Engines → Storage
 
----
+### Components:
 
-## 19. Roadmap
-Phase 1: MVP  
-Phase 2: Optimization  
-Phase 3: Data flywheel + human layer  
+-   LLM Layer
+-   Orchestrator
+-   Profile Service
+-   Strategy Service
+-   Task Service
+-   Essay Service
+-   Research Service
+-   Storage (DB + Files)
 
----
+------------------------------------------------------------------------
 
-## 20. Final Principle
-The product is not the chat.
+## 10. Data Model (Simplified)
 
-The product is:
-A system that remembers, reasons, structures, and evolves the candidate over time.
+Candidate: - id - type (UG / Grad) - profile - strategy - tasks -
+essays - files - chat history - logs
+
+------------------------------------------------------------------------
+
+## 11. Pricing
+
+  Plan              Price         Features
+  ----------------- ------------- -----------------
+  Grad AI           \$100         AI only
+  Grad Consultant   \$2000        AI + human
+  UG AI             \$1000/year   AI system
+  UG Consultant     \$5000/year   AI + consultant
+
+------------------------------------------------------------------------
+
+## 12. Success Metrics
+
+-   Conversion rate
+-   Retention / engagement
+-   Application success rate
+-   Task completion rate
+-   Essay improvement score
+
+------------------------------------------------------------------------
+
+## 13. Risks
+
+-   Trust in AI vs humans
+-   Poor input quality
+-   Over-automation
+-   Outcome dependency
+
+------------------------------------------------------------------------
+
+## 14. Future Enhancements
+
+-   DSPy optimization
+-   Data flywheel from past candidates
+-   Benchmarking engine
+-   Recommendation system improvements
+
+------------------------------------------------------------------------
+
+## 15. Summary
+
+This product is a structured, intelligent admissions OS that: - replaces
+consultants - scales expertise - maintains long-term candidate context -
+delivers strategy + execution
