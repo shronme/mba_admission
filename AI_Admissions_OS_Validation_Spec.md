@@ -1,189 +1,248 @@
-# AI Admissions OS + Narrative Engine + Validation Plan
+# AI Admissions Operating System – Combined Product Specification
 
-## Combined Product & Validation Specification
+## 1. Executive Summary
+This product is an AI-native admissions operating system that digitizes and scales the full workflow of admissions consulting (MBA, graduate, and undergraduate), combining structured reasoning, persistent memory, and LLM-powered narrative generation.
 
----
-
-# 1. Product Definition
-
-A persistent AI-native admissions operating system that replaces core functions of human admissions consultants.
-
-Core capabilities:
-- Structuring candidate data
-- Strategic decision making
-- Narrative generation
-- Execution guidance
-- Persistent memory
-- Optional human consultant layer
+It replaces fragmented workflows (email, docs, calls) with a unified system that:
+- Structures candidate data
+- Chooses strategy (upgrade / pivot / hybrid)
+- Generates narratives and essay guidance
+- Tracks execution over time
+- Integrates optional human consultants
 
 ---
 
-# 2. Core System Layers
+## 2. Vision
+Build a persistent, intelligent system that:
+- Understands candidates deeply
+- Adapts to each school’s expectations
+- Maintains continuity over time
+- Produces high-quality, personalized application strategies
 
-## Candidate Intelligence
-Raw → Structured → Diagnosed profile
+---
 
-## Strategy Engine
-- Strategy type: upgrade / pivot / hybrid
-- Risk analysis
+## 3. Problem
+Applicants struggle with:
+- Translating experience into compelling narratives
+- Understanding school-specific expectations
+- Structuring essays
+- Maintaining coherent strategy
+
+Consultants solve this manually at high cost.
+
+---
+
+## 4. Solution
+An AI platform that:
+1. Ingests candidate data (CV, story, goals)
+2. Structures and diagnoses the profile
+3. Maps candidate to schools
+4. Generates strategy and narrative
+5. Guides execution (essays, tasks, iterations)
+
+---
+
+## 5. Core Product Insight
+The product is NOT:
+- A chatbot
+- An essay generator
+
+It IS:
+- A system that structures, reasons, decides, and remembers
+
+Core functions:
+- Structuring chaos
+- Making decisions
+- Driving execution
+- Maintaining memory
+
+---
+
+## 6. User Segments
+### Graduate (MBA / Masters)
+- Short cycle (3–12 months)
+- Strategy-heavy
+- Narrative positioning
+
+### Undergraduate
+- Long cycle (3–5 years)
+- Development-focused
+- Activity + profile building
+
+---
+
+## 7. User Flow
+
+### Step 1: Input
+- CV / resume
+- Life story
+- Goals
+
+### Step 2: School Selection
+- Select schools
+- System loads profiles
+
+### Step 3: AI Processing
+- Candidate analysis
+- School analysis
+- Strategy generation
+
+### Step 4: Output
+- Narrative strategy
+- Essay themes
+- Outline
+
+### Step 5: Iteration
+- User refines inputs
+- System updates outputs
+
+---
+
+## 8. Consultant Workflow (Modeled by AI)
+
+### Graduate Flow
+dump → structure → diagnose → research → strategy → narrative → execute → iterate
+
+### Undergraduate Flow
+assess → explore → filter → build → spike → monitor → position → execute
+
+---
+
+## 9. System Architecture
+
+### Core Components
+- Candidate Analyzer
+- School Profiler
+- Strategy Engine
+- Narrative Builder (DSPy)
+- Essay Engine
+- Task Engine
+- Profile Engine
+- Storage Layer
+- Orchestration Layer
+
+---
+
+## 10. AI Pipeline
+
+### Candidate Analyzer
+Outputs structured profile:
+- Career arc
+- Leadership
+- Impact
+- Risks
+
+### School Profiler
+Extracts:
+- Values
+- Essay prompts
+- Fit signals
+
+### Narrative Builder (DSPy)
+Generates:
+- Core arc
+- Themes
+- Risks
+- Evidence mapping
+
+### Essay Engine
+- Outline generation
+- Draft review
+- Iterative refinement
+
+---
+
+## 11. DSPy Optimization
+- Few-shot learning using 30–40 accepted cases
+- BootstrapFewShot → MIPROv2
+- Dataset includes candidate + strategy + outcome
+
+---
+
+## 12. UX Design
+
+### Core Pillars
+- Chat (main interface)
+- Log (history + decisions)
+- Repository (documents)
+
+### Supporting
+- Profile state
+- Tasks
+- Research
+
+---
+
+## 13. Engagement Loop
+chat → analyze → store → update → generate tasks → repeat
+
+---
+
+## 14. Data Model (Simplified)
+
+Candidate:
+- profile_data
+- academics
+- activities
+- narrative
+- strategy
+- schools
+- tasks
+- essays
+- history
+
+---
+
+## 15. Pricing
+
+Graduate:
+- AI: $100
+- Consultant: $2000
+
+Undergraduate:
+- AI: $1000/year
+- Consultant: $5000/year
+
+---
+
+## 16. Evaluation Metrics
 - School fit
-- Positioning logic
-
-## Narrative Engine (Core Experiment)
-Input:
-- candidate profile
-- school profile
-- successful examples
-
-Output:
-- narrative strategy
-
-## Execution Engine
-- essay guidance
-- CV edits
-- recommendations
-- task tracking
-
-## Memory System
-- chat history
-- decisions
-- documents
-- logs
-
-## Orchestration Layer
-Routes user intent to appropriate engine
+- Specificity
+- Coherence
+- Differentiation
+- Grounding
 
 ---
 
-# 3. Key Insight
-
-The system must encode consultant decision logic:
-- structuring chaos
-- selecting strategy
-- building narrative
-- guiding execution
+## 17. Risks
+- Generic outputs
+- Data quality issues
+- Over-automation
+- Trust vs AI
 
 ---
 
-# 4. Validation Strategy
+## 18. Strategic Positioning
+This is:
+A persistent, intelligent admissions operating system
 
-Focus ONLY on validating the narrative engine.
-
----
-
-# 5. Experiment Setup
-
-Folder structure:
-
-experiment/
-  run_experiment.py
-  baseline.py
-  retrieval.py
-  evaluator.py
-  data/
-    train/
-    dev/
+Differentiators:
+- Structured memory
+- Decision logic
+- Workflow continuity
+- AI + human hybrid
 
 ---
 
-# 6. Dataset Requirements
-
-Each example must include:
-
-{
-  "candidate_structured": {},
-  "school": {},
-  "strategy": {
-    "narrative_arc": "",
-    "themes": [],
-    "strengths": [],
-    "risks": [],
-    "school_fit": ""
-  }
-}
+## 19. Roadmap
+Phase 1: MVP  
+Phase 2: Optimization  
+Phase 3: Data flywheel + human layer  
 
 ---
 
-# 7. Experiment Design
+## 20. Final Principle
+The product is not the chat.
 
-## Baseline
-candidate + school + examples → LLM → narrative
-
-## Retrieval
-- random
-- same school
-- similar profile
-
-## Structured vs Raw
-Compare structured vs raw input
-
----
-
-# 8. Evaluation
-
-Human evaluation (preferred):
-- school fit
-- differentiation
-- coherence
-- accuracy
-- usability
-
-Optional:
-LLM judge scoring
-
----
-
-# 9. Success Criteria
-
-Success:
-- expert approves output
-- tailored, specific, grounded
-
-Failure:
-- generic outputs
-- hallucinations
-- no differentiation
-
----
-
-# 10. DSPy Phase (After Validation)
-
-1. baseline prompt
-2. retrieval optimization
-3. structured inputs
-4. BootstrapFewShot
-5. MIPROv2
-
----
-
-# 11. Product Evolution
-
-Phase 1:
-- script experiment
-
-Phase 2:
-- API + narrative engine
-
-Phase 3:
-- full AI admissions OS
-
----
-
-# 12. Strategic Conclusion
-
-Business 1:
-- Narrative engine (fast validation)
-
-Business 2:
-- Full admissions OS (long-term vision)
-
-Only pursue Business 2 if Business 1 works.
-
----
-
-# 13. Next Steps
-
-1. Structure 5–10 examples
-2. Build baseline script
-3. Run evaluation with expert
-4. Decide based on results
+The product is:
+A system that remembers, reasons, structures, and evolves the candidate over time.
