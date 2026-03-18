@@ -16,7 +16,7 @@ Create four Railway services in the same project:
 3. `postgres` using Railway Postgres
 4. `redis` using Railway Redis
 
-The repo includes [railway.json](/Users/shronme/development/mba_admission/railway.json), so Railway will use `backend/Dockerfile` automatically.
+The repo includes [railway.json](/Users/shronme/development/mba_admission/railway.json), so Railway will use `backend/Dockerfile` automatically from the repository root build context.
 
 ## Configure the API service
 
