@@ -25,3 +25,4 @@ make test
 - Development plan: `AI_Admissions_OS_Development_Plan.md`
 - Validation spec: `AI_Admissions_OS_Validation_Spec.md`
 - ADR: `infra/adr/ADR-001-railway-first-deployment.md`
+- Deployment guide: `DEPLOY.md`
