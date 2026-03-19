@@ -4,10 +4,10 @@ import redis
 from app.core.config import settings
 from app.core.db import test_db_connection
 
-router = APIRouter(prefix="/health", tags=["health"])
+router = APIRouter(tags=["health"])
 
 
-@router.get("")
+@router.get("/health")
 async def health() -> dict:
     # Keep this lightweight for CI/local startup.
     payload: dict = {"status": "ok"}
