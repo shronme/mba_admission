@@ -10,6 +10,11 @@ New Railway services default to **Railpack**, which often **cannot** infer this 
 
 This repo includes **`railway.toml` at the repository root** with `builder = "DOCKERFILE"` and `dockerfilePath = "backend/Dockerfile"`, so **web** and **worker** services pick up the same Docker build as `docker-compose` (build context = repo root).
 
+**Important — healthchecks:** the **Celery worker is not an HTTP server**. Railway must **not** probe `GET /health` on the worker (you will see *service unavailable* / *replicas never became healthy*). Only the **web** service should use an HTTP healthcheck.
+
+- **Worker:** use default **`railway.toml`** (no `[deploy]` healthcheck), or in the dashboard clear **Healthcheck path** / disable HTTP healthcheck if Railway still shows one.
+- **Web (FastAPI):** either set **Deploy → Healthcheck path** to `/health` in the dashboard, **or** set that service’s config file to **`railway.web.toml`** (includes `healthcheckPath = "/health"`).
+
 **Next.js (`apps/web`):** create a **separate** Railway service and set **Config as code** to `apps/web/railway.toml` (Railpack for Node).
 
 **Dashboard alternative:** Service → **Settings → Build → Builder** → **Dockerfile**, path `backend/Dockerfile`, root directory = repo root (empty).

@@ -1,13 +1,12 @@
 # Default Railway config for services that deploy the **Python API** (and Celery worker)
 # from this monorepo. Build context = repo root (required: Dockerfile uses COPY backend/...).
 #
-# For the Next.js app (`apps/web`), create a separate Railway service and set its
-# "Config as code" file to `apps/web/railway.toml` (Railpack / Node).
+# Do NOT put HTTP healthchecks here: the Celery worker has no /health endpoint.
+# For the FastAPI **web** service only, set Healthcheck path = /health in the Railway UI
+# (Settings → Deploy), or use railway.web.toml as that service’s config file.
+#
+# Next.js (`apps/web`): separate service → apps/web/railway.toml
 
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "backend/Dockerfile"
-
-[deploy]
-healthcheckPath = "/health"
-healthcheckTimeout = 120

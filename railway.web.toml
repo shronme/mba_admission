@@ -1,0 +1,12 @@
+# Use for the **FastAPI web** service only (HTTP + /health).
+# Railway → Service → Settings → “Config as code” → path: railway.web.toml
+#
+# The **worker** service should use the default railway.toml (build only, no HTTP healthcheck).
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 120
