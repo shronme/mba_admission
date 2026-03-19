@@ -1,16 +1,18 @@
 FROM python:3.11-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    APP_ROLE=api
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-WORKDIR /app
+WORKDIR /app/backend
 
 COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
+COPY backend/static ./static
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "if [ \"${APP_ROLE}\" = \"worker\" ]; then python -m app.worker; else uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}; fi"]
+# Railway will typically override this with process-specific start commands.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+

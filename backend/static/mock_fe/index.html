@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mock FE — AI Admissions API</title>
+  <style>
+    :root {
+      font-family: system-ui, sans-serif;
+      line-height: 1.4;
+      color: #111;
+      background: #f6f7f9;
+    }
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.25rem; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e4e9;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+    }
+    button {
+      cursor: pointer;
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      border: 1px solid #c9cdd4;
+      background: #fff;
+      font-size: 0.9rem;
+    }
+    button:hover { background: #f0f2f5; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    pre {
+      margin: 0.75rem 0 0;
+      padding: 0.75rem;
+      background: #0d1117;
+      color: #e6edf3;
+      border-radius: 6px;
+      overflow: auto;
+      font-size: 0.8rem;
+    }
+    .muted { color: #5c6370; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Mock frontend (static)</h1>
+  <p class="muted">
+    Served from the API at <code>/fe/</code> — same origin, no CORS setup.
+    Open: <code>/fe/</code> on your API host (e.g. <code>http://localhost:8000/fe/</code>).
+  </p>
+
+  <div class="card">
+    <strong>GET /health</strong>
+    <div>
+      <button type="button" id="btn-health">Call health</button>
+    </div>
+    <pre id="out-health">(not run)</pre>
+  </div>
+
+  <div class="card">
+    <strong>Wiring smoke</strong> — <code>POST /wiring/smoke</code> then poll <code>GET /wiring/smoke/&lt;id&gt;</code>
+    <div>
+      <button type="button" id="btn-smoke">Run wiring smoke</button>
+    </div>
+    <pre id="out-smoke">(not run)</pre>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+
+    function formatBody(text) {
+      if (!text) return "(empty body)";
+      try {
+        return JSON.stringify(JSON.parse(text), null, 2);
+      } catch {
+        return text;
+      }
+    }
+
+    el("btn-health").addEventListener("click", async () => {
+      const btn = el("btn-health");
+      btn.disabled = true;
+      el("out-health").textContent = "Loading…";
+      try {
+        const res = await fetch("/health", { method: "GET" });
+        const text = await res.text();
+        el("out-health").textContent = `HTTP ${res.status}\n` + formatBody(text);
+      } catch (e) {
+        el("out-health").textContent = String(e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    el("btn-smoke").addEventListener("click", async () => {
+      const btn = el("btn-smoke");
+      btn.disabled = true;
+      const out = el("out-smoke");
+      out.textContent = "Enqueueing…";
+      try {
+        const post = await fetch("/wiring/smoke", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: "{}",
+        });
+        const postText = await post.text();
+        if (!post.ok) {
+          out.textContent = `HTTP ${post.status}\n` + formatBody(postText);
+          return;
+        }
+        let enqueue;
+        try {
+          enqueue = JSON.parse(postText || "{}");
+        } catch {
+          out.textContent = postText;
+          return;
+        }
+        const jobId = enqueue.job_id;
+        if (!jobId) {
+          out.textContent = "Unexpected response:\n" + formatBody(postText);
+          return;
+        }
+
+        const deadline = Date.now() + 60000;
+        let last = "";
+        while (Date.now() < deadline) {
+          const r = await fetch(`/wiring/smoke/${encodeURIComponent(jobId)}`);
+          const t = await r.text();
+          last = `HTTP ${r.status}\n` + formatBody(t);
+          let j;
+          try {
+            j = JSON.parse(t);
+          } catch {
+            out.textContent = last;
+            return;
+          }
+          if (j.state === "SUCCESS" || j.state === "FAILURE" || j.state === "REVOKED") {
+            out.textContent = last;
+            return;
+          }
+          out.textContent = `job_id ${jobId}\nstate ${j.state}\n(polling…)`;
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        out.textContent = last + "\n(timed out after 60s)";
+      } catch (e) {
+        out.textContent = String(e);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

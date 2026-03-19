@@ -1,1 +1,2 @@
-"""Backend application package for AI Admissions OS."""
+"""Backend application package."""
+
