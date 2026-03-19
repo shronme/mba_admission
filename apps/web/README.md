@@ -35,3 +35,22 @@ Real frontend scaffold aligned with the backlog: **Next.js (App Router)**, **Typ
 
 - **`/fe/`** on the API = static HTML served by FastAPI (same origin, quick smoke).
 - **`apps/web`** = real SPA/SSR app; uses `NEXT_PUBLIC_API_URL` and CORS.
+
+## Deploy on Railway
+
+1. **New service** in the same project → **GitHub repo** (same monorepo as the API).
+2. **Settings → Source**
+   - **Root Directory:** `apps/web` (critical: Railpack must see `package.json` here).
+3. **Settings → Config as code**
+   - Point to **`apps/web/railway.toml`** (path from repository root), **or** leave default and set **Builder = Railpack** and **Start Command** manually:
+     ```bash
+     npm run start -- -p $PORT -H 0.0.0.0
+     ```
+4. **Variables** (set **before** the first successful build if possible — `NEXT_PUBLIC_*` is baked in at build time):
+   - **`NEXT_PUBLIC_API_URL`** = your **public FastAPI URL**, e.g. `https://your-api.up.railway.app` (no trailing slash).
+   - Optional: `NODE_ENV=production` (often set automatically).
+5. **Networking** → generate a **public domain** for the frontend.
+6. **API CORS:** on the **FastAPI web** service, set **`CORS_ORIGINS`** to include your **frontend** origin exactly, e.g. `https://your-frontend.up.railway.app` (comma-separate multiple). Redeploy the API after changing it.
+7. Deploy the frontend service and open its URL; the home page should load the backend ping if CORS + `NEXT_PUBLIC_API_URL` are correct.
+
+**Monorepo note:** the repo root [`railway.toml`](../railway.toml) is for the **Docker API/worker**. The frontend service must use **`apps/web`** as root + [`railway.toml`](railway.toml) in this folder (Railpack), not the root Docker config.

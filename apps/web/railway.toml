@@ -1,6 +1,12 @@
-# Use this file for a **separate** Railway service that deploys only the Next.js app.
-# In Railway: Service → Settings → set "Config as code" path to `apps/web/railway.toml`
-# (and set the service root / watch paths to `apps/web` if offered).
+# Next.js service on Railway — use as this service’s “Config as code” file
+# (path from repo root: apps/web/railway.toml).
+#
+# In Railway: set the service **Root Directory** to `apps/web` so the build runs
+# in the folder that contains package.json.
 
 [build]
 builder = "RAILPACK"
+
+[deploy]
+# Railway injects PORT; bind on all interfaces for the proxy.
+startCommand = "npm run start -- -p $PORT -H 0.0.0.0"

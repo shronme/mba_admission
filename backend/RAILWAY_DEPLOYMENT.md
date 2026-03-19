@@ -15,7 +15,7 @@ This repo includes **`railway.toml` at the repository root** with `builder = "DO
 - **Worker:** use default **`railway.toml`** (no `[deploy]` healthcheck), or in the dashboard clear **Healthcheck path** / disable HTTP healthcheck if Railway still shows one.
 - **Web (FastAPI):** either set **Deploy → Healthcheck path** to `/health` in the dashboard, **or** set that service’s config file to **`railway.web.toml`** (includes `healthcheckPath = "/health"`).
 
-**Next.js (`apps/web`):** create a **separate** Railway service and set **Config as code** to `apps/web/railway.toml` (Railpack for Node).
+**Next.js (`apps/web`):** separate Railway service — step-by-step in **[`apps/web/README.md`](../apps/web/README.md#deploy-on-railway)** (root directory `apps/web`, `NEXT_PUBLIC_API_URL`, CORS on the API).
 
 **Dashboard alternative:** Service → **Settings → Build → Builder** → **Dockerfile**, path `backend/Dockerfile`, root directory = repo root (empty).
 
