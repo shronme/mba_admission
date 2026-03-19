@@ -33,16 +33,16 @@ export function BackendPing() {
           <p className="text-red-600">
             {(q.error as Error).message}
             <span className="mt-2 block text-xs text-neutral-500">
-              <strong>Check:</strong> API reachable from this machine?{" "}
-              <code className="rounded bg-neutral-100 px-1">
-                curl -i {base}/health
-              </code>
+              <strong>404?</strong> <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code> must
+              be the <strong>FastAPI</strong> Railway URL (uvicorn), not this Next.js site’s URL.
               <br />
-              In DevTools → Network, confirm the request isn’t blocked by CORS (missing{" "}
-              <code className="rounded bg-neutral-100 px-1">Access-Control-Allow-Origin</code>
-              ). Backend: set{" "}
-              <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code> to this page’s
-              origin (including port), then restart the API.
+              <strong>Check API directly:</strong>{" "}
+              <code className="rounded bg-neutral-100 px-1">curl -i {base}/health</code> — expect{" "}
+              <code className="rounded bg-neutral-100 px-1">{`{"status":"ok"}`}</code>
+              <br />
+              <strong>CORS:</strong> on the API, set{" "}
+              <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code> to this page’s origin,
+              then redeploy the API.
             </span>
           </p>
         )}

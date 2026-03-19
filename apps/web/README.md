@@ -47,7 +47,7 @@ Real frontend scaffold aligned with the backlog: **Next.js (App Router)**, **Typ
      npm run start -- -p $PORT -H 0.0.0.0
      ```
 4. **Variables** (set **before** the first successful build if possible — `NEXT_PUBLIC_*` is baked in at build time):
-   - **`NEXT_PUBLIC_API_URL`** = your **public FastAPI URL**, e.g. `https://your-api.up.railway.app` (no trailing slash).
+   - **`NEXT_PUBLIC_API_URL`** = your **FastAPI** service’s public URL (the one where `curl …/health` returns `{"status":"ok"}`), e.g. `https://your-api.up.railway.app`. **Not** the Next.js frontend domain — using the frontend URL causes **404** on `/health`.
    - Optional: `NODE_ENV=production` (often set automatically).
 5. **Networking** → generate a **public domain** for the frontend.
 6. **API CORS:** on the **FastAPI web** service, set **`CORS_ORIGINS`** to include your **frontend** origin exactly, e.g. `https://your-frontend.up.railway.app` (comma-separate multiple). Redeploy the API after changing it.

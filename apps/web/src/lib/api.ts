@@ -1,10 +1,17 @@
 /**
  * Base URL for FastAPI. Must be reachable from the **browser** (not from Docker internal hostnames).
+ * Use the **API** service’s public URL — not the Next.js frontend URL (GET /health exists only on FastAPI).
  */
 export function getApiBaseUrl(): string | null {
-  const base = process.env.NEXT_PUBLIC_API_URL;
+  const raw = process.env.NEXT_PUBLIC_API_URL;
+  if (!raw) return null;
+  let base = raw.trim().replace(/\/$/, "");
   if (!base) return null;
-  return base.replace(/\/$/, "");
+  // Avoid invalid relative fetches if someone omits the scheme (Railway vars often pasted host-only).
+  if (!/^https?:\/\//i.test(base)) {
+    base = `https://${base}`;
+  }
+  return base;
 }
 
 export async function fetchHealth(): Promise<unknown> {
@@ -19,7 +26,11 @@ export async function fetchHealth(): Promise<unknown> {
     cache: "no-store",
   });
   if (!res.ok) {
-    throw new Error(`GET /health failed: ${res.status}`);
+    const hint404 =
+      res.status === 404
+        ? " (404 usually means NEXT_PUBLIC_API_URL points at the **frontend** host, not the **FastAPI** host — use the API service’s Railway domain.)"
+        : "";
+    throw new Error(`GET /health failed: ${res.status}${hint404}`);
   }
   return res.json();
 }
