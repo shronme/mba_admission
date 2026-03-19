@@ -34,12 +34,9 @@ The backend reads these variables (see `backend/app/core/config.py`):
 3. Optional: `LOG_LEVEL`, `ENV`
 
 ### DATABASE_URL format note (async SQLAlchemy)
-Railway’s Postgres URL is often `postgres://...`.
-Change it to `postgresql+asyncpg://...` before setting `DATABASE_URL`.
+Railway’s Postgres URL is often `postgres://...` or `postgresql://...` **without** a driver.
 
-Example transformation:
-- `postgres://user:pass@host:5432/dbname`
-- `postgresql+asyncpg://user:pass@host:5432/dbname`
+The backend **auto-normalizes** those to `postgresql+asyncpg://...` when settings load (see `normalize_database_url_for_asyncpg` in `backend/app/core/config.py`). You can still set `DATABASE_URL` to `postgresql+asyncpg://...` yourself if you prefer.
 
 ### REDIS_URL format
 Set `REDIS_URL` to the Redis connection string Railway provides, typically in the form:

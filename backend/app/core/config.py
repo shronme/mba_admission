@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,24 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:postgres@localhost:5432/mba_admissions",
         validation_alias="DATABASE_URL",
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalize_database_url_for_asyncpg(cls, v: object) -> object:
+        """
+        Railway/Postgres often provide `postgres://` or `postgresql://` without a driver.
+        SQLAlchemy then picks the **sync** dialect (psycopg2), which we do not install.
+        Async SQLAlchemy must use the asyncpg driver: `postgresql+asyncpg://`.
+        """
+        if not isinstance(v, str):
+            return v
+        s = v.strip()
+        if s.startswith("postgres://"):
+            return "postgresql+asyncpg://" + s[len("postgres://") :]
+        if s.startswith("postgresql://") and not s.startswith("postgresql+"):
+            return "postgresql+asyncpg://" + s[len("postgresql://") :]
+        return v
+
     redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
 
     # FastAPI health checks
