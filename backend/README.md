@@ -1,0 +1,46 @@
+# Backend (FastAPI)
+
+## Task 002 — persistence
+
+- **Models:** `app/db/models/` (candidates, profiles, chats, files, strategy, tasks, essays, AI runs, audit).
+- **Repositories:** `app/repositories/` (`CandidateRepository`, `ChatRepository`).
+- **Migrations:** Alembic in `alembic/versions/` — create new revisions with `alembic revision --autogenerate` only.
+
+### Test with Docker Compose (migrations on boot)
+
+From the **repository root**:
+
+```bash
+docker compose up --build web
+```
+
+- **`web`** waits until **Postgres is healthy**, then the entrypoint runs **`alembic upgrade head`**, then starts **uvicorn** on [http://localhost:8000](http://localhost:8000).
+- **`worker`** does not run migrations (only the web role does).
+
+Full stack (API + worker + Redis + Postgres):
+
+```bash
+docker compose up --build
+```
+
+Optional seed (host Python, DB reachable on `localhost:5432`):
+
+```bash
+cd backend && export PYTHONPATH=. DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mba_admissions
+python scripts/seed_task002_demo.py
+```
+
+### Commands without Docker (from `backend/`)
+
+```bash
+export PYTHONPATH=.
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mba_admissions
+
+alembic upgrade head
+pytest -q
+python scripts/seed_task002_demo.py
+```
+
+Use `docker compose up -d postgres` from the repo root if you only need Postgres on `localhost:5432`.
+
+See **[`RAILWAY_DEPLOYMENT.md`](RAILWAY_DEPLOYMENT.md)** for production deploy notes.

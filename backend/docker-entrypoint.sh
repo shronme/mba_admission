@@ -2,12 +2,20 @@
 set -e
 
 # Single image: select process via env (Railway / compose set per service).
-# - web: FastAPI (honours Railway PORT)
-# - worker: Celery worker
+# - web: Alembic migrate (unless skipped) + FastAPI (honours Railway PORT)
+# - worker: Celery worker (does not run migrations — avoid concurrent upgrades)
 ROLE="${APP_ROLE:-web}"
 
 case "$ROLE" in
   web)
+    if [ "${SKIP_DB_MIGRATIONS:-}" != "1" ]; then
+      echo "docker-entrypoint: alembic upgrade head"
+      export PYTHONPATH="${PYTHONPATH:-/app/backend}"
+      cd /app/backend
+      alembic upgrade head
+    else
+      echo "docker-entrypoint: SKIP_DB_MIGRATIONS=1 — skipping Alembic"
+    fi
     exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
     ;;
   worker)

@@ -26,6 +26,9 @@ This repo includes **`railway.toml` at the repository root** with `builder = "DO
 ## 2) Add managed services
 1. Add a **Redis** service to the Railway project.
 2. Add a **Postgres** service to the Railway project.
+3. **(Recommended for uploads)** Add a Railway **Storage Bucket** — private, **S3-compatible** object storage for file bytes. Postgres should only store **`uploaded_files` metadata** (filename, size, `storage_uri`, status); the API uploads/downloads via the S3 API using credentials from the bucket’s **Credentials** tab. See Railway’s guide: **[Storage Buckets](https://docs.railway.com/guides/storage-buckets)**.
+
+   Typical env vars (names vary slightly in the dashboard; mirror them into your **web** service): bucket name, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `REGION`, and S3 **`ENDPOINT`** (Railway uses an S3-compatible endpoint, not AWS’s default). Buckets are **private** by default — use **presigned GET/PUT URLs** from FastAPI rather than exposing the bucket publicly.
 
 ## 3) Configure environment variables
 The backend reads these variables (see `backend/app/core/config.py`):
@@ -50,6 +53,29 @@ Celery uses Redis for both broker and result backend in this skeleton.
 
 Celery may read `CELERY_BROKER_URL` from the environment; if it points at `localhost` while the app runs in a container, enqueue will fail with `Connection refused`.
 
+### Database migrations (Alembic — Task 002)
+Schema is managed with **Alembic** (`backend/alembic/`, `backend/alembic.ini`). The image includes these files.
+
+**On container start (Docker Compose + Railway):** the **`web`** process runs `alembic upgrade head` **before** `uvicorn` (see [`docker-entrypoint.sh`](docker-entrypoint.sh)). The **worker** does **not** run migrations (avoids two replicas racing the same upgrade).
+
+- **Opt out (debug / custom flows):** set `SKIP_DB_MIGRATIONS=1` on the **web** service and run `alembic upgrade head` yourself.
+
+`alembic/env.py` converts `DATABASE_URL` (`postgresql+asyncpg://…`) to a sync `postgresql+psycopg://…` URL for migrations.
+
+**Local without Compose:** from `backend/` with Postgres running:
+```bash
+export PYTHONPATH=.
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mba_admissions
+alembic upgrade head
+```
+
+**New revisions:** always use autogenerate against a dev database, never hand-edit empty migrations:
+```bash
+alembic revision --autogenerate -m "describe change"
+```
+
+**Demo seed (optional):** `python scripts/seed_task002_demo.py` (requires `DATABASE_URL` and `PYTHONPATH=.` from `backend/` — not run automatically in Docker).
+
 ## 4) Add the Docker build
 1. Configure the deployable Docker source to use:
    - Dockerfile: `backend/Dockerfile`
@@ -60,7 +86,7 @@ Use **two Railway services** from the **same repo + same Dockerfile** (`backend/
 
 ### Process A: `web` service
 1. **Variables:** set `APP_ROLE=web` (optional if you rely on the default `web` in the entrypoint).
-2. Railway injects **`PORT`** automatically — the entrypoint runs `uvicorn` on that port.
+2. Railway injects **`PORT`** automatically — the entrypoint runs **`alembic upgrade head`** then `uvicorn` on that port.
 3. **Custom Start Command:** leave **empty** so Docker’s `ENTRYPOINT` runs (recommended), *or* set the same as local:  
    `./docker-entrypoint.sh`  
    (only needed if your platform replaces `ENTRYPOINT`; on Railway, empty is usually fine.)

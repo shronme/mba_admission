@@ -80,6 +80,18 @@ class Settings(BaseSettings):
     def celery_result_backend(self) -> str:
         return self.redis_url
 
+    def database_url_sync(self) -> str:
+        """
+        Synchronous SQLAlchemy URL for Alembic and other sync tools.
+
+        The app runtime uses asyncpg (`postgresql+asyncpg://`); migrations use psycopg3.
+        """
+
+        u = self.database_url
+        if u.startswith("postgresql+asyncpg://"):
+            return "postgresql+psycopg://" + u[len("postgresql+asyncpg://") :]
+        return u
+
 
 settings = Settings()
 

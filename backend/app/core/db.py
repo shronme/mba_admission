@@ -9,6 +9,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.core.config import settings
 
+# Register ORM models on Base.metadata (imports are side-effect only).
+import app.db.models  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 

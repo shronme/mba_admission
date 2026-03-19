@@ -20,3 +20,9 @@ def test_preserves_existing_asyncpg(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", url)
     s = Settings()
     assert s.database_url == url
+
+
+def test_database_url_sync_for_alembic(monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@h:5432/db")
+    s = Settings()
+    assert s.database_url_sync() == "postgresql+psycopg://u:p@h:5432/db"

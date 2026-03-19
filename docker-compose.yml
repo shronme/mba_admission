@@ -10,16 +10,26 @@ services:
       POSTGRES_DB: mba_admissions
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+    ports:
+      # Host access for local Alembic / seed scripts (optional; remove if port 5432 is taken).
+      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d mba_admissions"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
 
   web:
     build:
       context: .
       dockerfile: backend/Dockerfile
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     environment:
       APP_ROLE: web
       PORT: "8000"
@@ -42,8 +52,10 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
     environment:
       APP_ROLE: worker
       ENV: development

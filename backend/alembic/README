@@ -1,0 +1,13 @@
+Alembic revision files live in `versions/`.
+
+Generate migrations (empty DB recommended for the first run):
+
+```bash
+cd backend
+export PYTHONPATH=.
+export DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/mba_admissions
+alembic revision --autogenerate -m "describe change"
+alembic upgrade head
+```
+
+`env.py` converts `DATABASE_URL` to a sync `postgresql+psycopg://` URL automatically.
