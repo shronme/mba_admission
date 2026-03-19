@@ -1,0 +1,45 @@
+"""API schemas for candidate-facing flows (fake login / enter)."""
+
+from __future__ import annotations
+
+import uuid
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class CandidateEnterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: EmailStr
+    full_name: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Used when creating a new candidate; defaults from the email local part if omitted.",
+    )
+
+
+class CandidateProfileOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    headline: str | None = None
+    summary: str | None = None
+    attributes: dict[str, Any] | None = None
+
+
+class CandidateOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    email: str | None
+    full_name: str
+    program_type: str
+    status: str
+    profile: CandidateProfileOut | None = None
+
+
+class CandidateEnterResponse(BaseModel):
+    """Fake login: existing row vs newly created."""
+
+    created: bool
+    candidate: CandidateOut

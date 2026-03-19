@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+import { useOptionalCandidate } from "@/context/SessionContext";
 import {
   enqueueSampleSleep,
   fetchAiRunStatus,
@@ -23,11 +25,18 @@ function isTerminalAiRunStatus(status: string) {
 
 export function SampleJobPanel() {
   const base = getApiBaseUrl();
+  const loggedInCandidate = useOptionalCandidate();
   const [phase, setPhase] = useState<Phase>("idle");
   const [sleepSeconds, setSleepSeconds] = useState("0.5");
   const [simulateTransientFail, setSimulateTransientFail] = useState(false);
   const [correlationId, setCorrelationId] = useState("");
   const [candidateId, setCandidateId] = useState("");
+
+  useEffect(() => {
+    if (loggedInCandidate?.id) {
+      setCandidateId((prev) => (prev.trim() === "" ? loggedInCandidate.id : prev));
+    }
+  }, [loggedInCandidate?.id]);
   const [log, setLog] = useState<string>("(not run)");
   const [lastAiRun, setLastAiRun] = useState<AiRunStatusPayload | null>(null);
   const [lastCelery, setLastCelery] = useState<CeleryTaskMetaPayload | null>(

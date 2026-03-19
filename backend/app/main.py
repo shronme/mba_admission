@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
+from app.api.routes.candidates_enter import router as candidates_enter_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.wiring_smoke import router as wiring_smoke_router
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(candidates_enter_router)
     app.include_router(jobs_router)
     app.include_router(wiring_smoke_router)
 

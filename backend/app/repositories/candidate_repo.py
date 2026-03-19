@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from app.db.enums import CandidateStatus, ProgramType
@@ -73,4 +73,14 @@ class CandidateRepository(BaseRepository):
 
     async def get_by_email(self, email: str) -> Candidate | None:
         result = await self.session.execute(select(Candidate).where(Candidate.email == email))
+        return result.scalar_one_or_none()
+
+    async def get_by_email_ci_with_profile(self, email_normalized: str) -> Candidate | None:
+        """Case-insensitive match + eager profile (for enter / fake login)."""
+
+        result = await self.session.execute(
+            select(Candidate)
+            .options(selectinload(Candidate.profile))
+            .where(func.lower(Candidate.email) == email_normalized.lower()),
+        )
         return result.scalar_one_or_none()

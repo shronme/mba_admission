@@ -2,6 +2,81 @@
  * Base URL for FastAPI. Must be reachable from the **browser** (not from Docker internal hostnames).
  * Use the **API** service’s public URL — not the Next.js frontend URL (GET /health exists only on FastAPI).
  */
+
+/** Candidate + profile from POST /candidates/enter */
+export type CandidateProfileDto = {
+  headline: string | null;
+  summary: string | null;
+  attributes: Record<string, unknown> | null;
+};
+
+export type CandidateDto = {
+  id: string;
+  email: string | null;
+  full_name: string;
+  program_type: string;
+  status: string;
+  profile: CandidateProfileDto | null;
+};
+
+export type EnterResponse = {
+  created: boolean;
+  candidate: CandidateDto;
+};
+
+export async function enterWithEmail(body: {
+  email: string;
+  full_name?: string;
+}): Promise<EnterResponse> {
+  const root = getApiBaseUrl();
+  if (!root) {
+    throw new Error(
+      "NEXT_PUBLIC_API_URL is not set. Copy apps/web/.env.example to apps/web/.env.local",
+    );
+  }
+  const res = await fetch(`${root}/candidates/enter`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: body.email.trim(),
+      full_name: body.full_name?.trim() || undefined,
+    }),
+    cache: "no-store",
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /candidates/enter: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(
+      `POST /candidates/enter failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
+    );
+  }
+  const obj = data as Record<string, unknown>;
+  const created = obj.created === true;
+  const cand = obj.candidate as Record<string, unknown> | undefined;
+  if (!cand || typeof cand.id !== "string") {
+    throw new Error(`POST /candidates/enter: unexpected shape ${text}`);
+  }
+  return {
+    created,
+    candidate: {
+      id: cand.id,
+      email: (cand.email as string | null) ?? null,
+      full_name: String(cand.full_name ?? ""),
+      program_type: String(cand.program_type ?? ""),
+      status: String(cand.status ?? ""),
+      profile:
+        cand.profile !== null && typeof cand.profile === "object"
+          ? (cand.profile as CandidateProfileDto)
+          : null,
+    },
+  };
+}
+
 export function getApiBaseUrl(): string | null {
   const raw = process.env.NEXT_PUBLIC_API_URL;
   if (!raw) return null;

@@ -27,7 +27,7 @@ Real frontend scaffold aligned with the backlog: **Next.js (App Router)**, **Typ
    npm run dev
    ```
 
-4. Open [http://localhost:3000](http://localhost:3000). The home page calls `GET /health` via TanStack Query.
+4. Open [http://localhost:3000](http://localhost:3000). Enter your email to **load or create** a candidate (`POST /candidates/enter`); the session is stored in `localStorage` (fake login — no password). After that you’ll see API diagnostics (health, wiring smoke, sample job).
 
 **CORS:** the FastAPI app allows origins from `CORS_ORIGINS` (defaults include `http://localhost:3000`). For production, set `CORS_ORIGINS` to your deployed web origin.
 

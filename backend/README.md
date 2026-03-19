@@ -50,4 +50,10 @@ Use `docker compose up -d postgres` from the repo root if you only need Postgres
 - **Worker DB:** `app/core/sync_db.py`, `app/workers/ai_run_sync.py`.
 - **Sample job:** `POST /jobs/sample-sleep` → `GET /jobs/ai-runs/{id}` (see **[`docs/AI_JOB_FRAMEWORK.md`](docs/AI_JOB_FRAMEWORK.md)**).
 
+### Fake login (candidates)
+
+- **`POST /candidates/enter`** — JSON `{ "email": "…", "full_name": "…" (optional) }`. Case-insensitive email match; creates a candidate with a derived display name if new. Returns `{ created, candidate }` including `profile` when present.
+
+This is a **scaffold** (no auth); lock down or replace before production.
+
 See **[`RAILWAY_DEPLOYMENT.md`](RAILWAY_DEPLOYMENT.md)** for production deploy notes.
