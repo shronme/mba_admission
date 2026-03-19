@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
 from app.api.routes.health import router as health_router
+from app.api.routes.jobs import router as jobs_router
 from app.api.routes.wiring_smoke import router as wiring_smoke_router
 from app.core.config import settings
 from app.core.logging import configure_logging
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(health_router)
+    app.include_router(jobs_router)
     app.include_router(wiring_smoke_router)
 
     # Minimal static “mock FE” (same origin as API — no CORS).

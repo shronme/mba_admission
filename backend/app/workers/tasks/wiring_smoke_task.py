@@ -1,9 +1,7 @@
 import asyncio
 import logging
 
-import redis
-from celery import shared_task
-
+from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.db import async_select_one
 
@@ -19,7 +17,7 @@ async def _wiring_smoke_async() -> dict:
     return {"redis_connected": True, "db_connected": True, "select_one": select_one}
 
 
-@shared_task(name="app.workers.tasks.wiring_smoke_job")
+@celery_app.task(name="app.workers.tasks.wiring_smoke_job")
 def wiring_smoke_job() -> dict:
     """
     End-to-end wiring check payload for Task 001.

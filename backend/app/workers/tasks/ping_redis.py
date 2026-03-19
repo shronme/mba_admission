@@ -1,14 +1,14 @@
 import logging
 
 import redis
-from celery import shared_task
 
+from app.core.celery_app import celery_app
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-@shared_task(name="app.workers.tasks.ping_redis")
+@celery_app.task(name="app.workers.tasks.ping_redis")
 def ping_redis() -> dict:
     """
     Minimal Redis connectivity check.
