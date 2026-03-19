@@ -5,6 +5,15 @@ This doc explains how to deploy the backend skeleton on Railway using:
 - Celery worker process (`celery worker`)
 - Managed Postgres + Redis services
 
+## 0) Builder: use Docker (not Railpack)
+New Railway services default to **Railpack**, which often **cannot** infer this monorepo (errors like `start.sh not found` / “could not determine how to build”).
+
+This repo includes **`railway.toml` at the repository root** with `builder = "DOCKERFILE"` and `dockerfilePath = "backend/Dockerfile"`, so **web** and **worker** services pick up the same Docker build as `docker-compose` (build context = repo root).
+
+**Next.js (`apps/web`):** create a **separate** Railway service and set **Config as code** to `apps/web/railway.toml` (Railpack for Node).
+
+**Dashboard alternative:** Service → **Settings → Build → Builder** → **Dockerfile**, path `backend/Dockerfile`, root directory = repo root (empty).
+
 ## 1) Prerequisites
 1. Create a Railway account and a new project.
 2. Make sure your Railway project can connect to Docker builds from this repository.
@@ -45,19 +54,21 @@ Celery may read `CELERY_BROKER_URL` from the environment; if it points at `local
 2. Build context should include the `backend/` directory (in most setups, using the repo root as context is fine).
 
 ## 5) Configure processes (web + worker)
-In Railway, add two processes pointing at the same Docker image.
+Use **two Railway services** from the **same repo + same Dockerfile** (`backend/Dockerfile`). The image uses [`docker-entrypoint.sh`](docker-entrypoint.sh): the role is selected with **`APP_ROLE`**, so you do **not** need different start commands in the dashboard unless you prefer to override them.
 
-### Process A: `web`
-Start command:
-```sh
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-```
+### Process A: `web` service
+1. **Variables:** set `APP_ROLE=web` (optional if you rely on the default `web` in the entrypoint).
+2. Railway injects **`PORT`** automatically — the entrypoint runs `uvicorn` on that port.
+3. **Custom Start Command:** leave **empty** so Docker’s `ENTRYPOINT` runs (recommended), *or* set the same as local:  
+   `./docker-entrypoint.sh`  
+   (only needed if your platform replaces `ENTRYPOINT`; on Railway, empty is usually fine.)
 
-### Process B: `worker`
-Start command:
-```sh
-celery -A app.core.celery_app worker -l info
-```
+### Process B: `worker` service
+1. **Variables:** set `APP_ROLE=worker`.
+2. **Custom Start Command:** leave **empty** (use image `ENTRYPOINT`).
+3. Do **not** assign a public domain to this service.
+
+Same **`DATABASE_URL` / `REDIS_URL` / `CELERY_*`** as the web service (see §3).
 
 ## 6) Deploy
 Deploy the Railway service(s).

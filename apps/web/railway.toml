@@ -1,0 +1,6 @@
+# Use this file for a **separate** Railway service that deploys only the Next.js app.
+# In Railway: Service → Settings → set "Config as code" path to `apps/web/railway.toml`
+# (and set the service root / watch paths to `apps/web` if offered).
+
+[build]
+builder = "RAILPACK"

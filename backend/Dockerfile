@@ -11,8 +11,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/app ./app
 COPY backend/static ./static
 
+COPY backend/docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
+
 EXPOSE 8000
 
-# Railway will typically override this with process-specific start commands.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-
+# One image: role chosen by APP_ROLE (web | worker). See docker-entrypoint.sh.
+ENTRYPOINT ["./docker-entrypoint.sh"]
