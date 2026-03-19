@@ -1,4 +1,5 @@
 import { BackendPing } from "@/components/BackendPing";
+import { SampleJobPanel } from "@/components/SampleJobPanel";
 import { WiringSmoke } from "@/components/WiringSmoke";
 
 export default function HomePage() {
@@ -17,9 +18,16 @@ export default function HomePage() {
         is same-origin only; this app uses{" "}
         <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code> + CORS.
       </p>
+      <p className="mt-2 text-sm text-neutral-600">
+        On <strong>Railway</strong>: set <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code>{" "}
+        at <strong>build time</strong> to your API URL, and add this site&apos;s origin to API{" "}
+        <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code>. Redeploy the frontend after
+        changing <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_*</code>.
+      </p>
       <div className="mt-8 space-y-6">
         <BackendPing />
         <WiringSmoke />
+        <SampleJobPanel />
       </div>
     </main>
   );

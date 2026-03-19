@@ -51,6 +51,6 @@ Real frontend scaffold aligned with the backlog: **Next.js (App Router)**, **Typ
    - Optional: `NODE_ENV=production` (often set automatically).
 5. **Networking** → generate a **public domain** for the frontend.
 6. **API CORS:** on the **FastAPI web** service, set **`CORS_ORIGINS`** to include your **frontend** origin exactly, e.g. `https://your-frontend.up.railway.app` (comma-separate multiple). Redeploy the API after changing it.
-7. Deploy the frontend service and open its URL; the home page should load the backend ping if CORS + `NEXT_PUBLIC_API_URL` are correct.
+7. Deploy the frontend service and open its URL; the home page should load the **backend ping**, **wiring smoke** (Celery + DB), and **sample Celery job** (Task 003: `ai_run` lifecycle) if CORS + `NEXT_PUBLIC_API_URL` are correct and both **API web** and **worker** are running with a migrated database.
 
 **Monorepo note:** the repo root [`railway.toml`](../railway.toml) is for the **Docker API/worker**. The frontend service must use **`apps/web`** as root + [`railway.toml`](railway.toml) in this folder (Railpack), not the root Docker config.
