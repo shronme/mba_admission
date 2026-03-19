@@ -27,22 +27,36 @@ export function BackendPing() {
       <p className="mt-1 text-xs text-neutral-500">
         API: <code className="rounded bg-neutral-100 px-1">{base}</code>
       </p>
+      <p className="mt-1 text-xs text-neutral-500">
+        This page (paste into API <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code>):{" "}
+        <code className="rounded bg-neutral-100 px-1">
+          {typeof window !== "undefined" ? window.location.origin : "(open in browser)"}
+        </code>
+      </p>
       <div className="mt-3 text-sm">
         {q.isPending && <p className="text-neutral-600">Loading…</p>}
         {q.isError && (
           <p className="text-red-600">
             {(q.error as Error).message}
             <span className="mt-2 block text-xs text-neutral-500">
-              <strong>404?</strong> <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code> must
-              be the <strong>FastAPI</strong> Railway URL (uvicorn), not this Next.js site’s URL.
+              <strong>“Failed to fetch”</strong> is almost always{" "}
+              <strong>CORS</strong> (wrong/missing origin on the API) or the API URL is not FastAPI. It is{" "}
+              <em>not</em> an HTTP 404 from our code path.
               <br />
-              <strong>Check API directly:</strong>{" "}
+              <strong>Wrong host?</strong>{" "}
+              <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code> must be the{" "}
+              <strong>FastAPI</strong> Railway service URL, not this Next.js site’s URL.
+              <br />
+              <strong>Check API from your laptop:</strong>{" "}
               <code className="rounded bg-neutral-100 px-1">curl -i {base}/health</code> — expect{" "}
               <code className="rounded bg-neutral-100 px-1">{`{"status":"ok"}`}</code>
               <br />
-              <strong>CORS:</strong> on the API, set{" "}
-              <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code> to this page’s origin,
-              then redeploy the API.
+              <strong>CORS fix:</strong> on the <strong>API</strong> Railway service, set{" "}
+              <code className="rounded bg-neutral-100 px-1">CORS_ORIGINS</code> to{" "}
+              <code className="rounded bg-neutral-100 px-1">
+                {typeof window !== "undefined" ? window.location.origin : "this page’s origin"}
+              </code>{" "}
+              (comma-separate multiple origins), then redeploy the API.
             </span>
           </p>
         )}

@@ -21,10 +21,23 @@ export async function fetchHealth(): Promise<unknown> {
       "NEXT_PUBLIC_API_URL is not set. Copy apps/web/.env.example to apps/web/.env.local",
     );
   }
-  const res = await fetch(`${root}/health`, {
-    method: "GET",
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    // Avoid cache: "no-store" here — some browsers add Cache-Control and trigger a CORS preflight for GET.
+    res = await fetch(`${root}/health`, { method: "GET" });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (
+      msg === "Failed to fetch" ||
+      msg.includes("NetworkError") ||
+      msg.includes("Load failed")
+    ) {
+      throw new Error(
+        "Failed to fetch — usually CORS (API must allow this page’s origin in CORS_ORIGINS) or NEXT_PUBLIC_API_URL points at the wrong host (must be FastAPI, not Next.js).",
+      );
+    }
+    throw e;
+  }
   if (!res.ok) {
     const hint404 =
       res.status === 404
