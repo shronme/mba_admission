@@ -6,11 +6,12 @@ Task 003: sample sleep job demonstrates retries, DB status updates, correlation 
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 import redis
 from celery.result import AsyncResult
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.celery_app import celery_app
@@ -23,11 +24,14 @@ from app.workers.tasks.sample_ai_job_task import sample_sleep_ai_job
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
+logger = logging.getLogger(__name__)
+
 
 def _check_broker() -> None:
     try:
         redis.Redis.from_url(settings.redis_url).ping()
     except Exception as e:  # noqa: BLE001
+        logger.warning("jobs_broker_check redis_failed error=%s", str(e))
         raise HTTPException(
             status_code=503,
             detail={"error": "Redis unreachable", "message": str(e)},
@@ -36,6 +40,7 @@ def _check_broker() -> None:
         with celery_app.connection() as conn:
             conn.ensure_connection(max_retries=1)
     except Exception as e:  # noqa: BLE001
+        logger.warning("jobs_broker_check celery_failed error=%s", str(e))
         raise HTTPException(
             status_code=503,
             detail={"error": "Celery broker unreachable", "message": str(e)},
@@ -44,6 +49,7 @@ def _check_broker() -> None:
 
 @router.post("/sample-sleep", response_model=SampleSleepEnqueueResponse)
 async def enqueue_sample_sleep(
+    request: Request,
     body: SampleSleepEnqueueBody,
     session: AsyncSession = Depends(get_db_session),
 ) -> SampleSleepEnqueueResponse:
@@ -53,6 +59,17 @@ async def enqueue_sample_sleep(
     Poll `GET /jobs/ai-runs/{ai_run_id}` for lifecycle: QUEUED → RUNNING → SUCCEEDED/FAILED.
     """
 
+    effective_correlation_id = body.correlation_id
+    if effective_correlation_id is None:
+        effective_correlation_id = getattr(request.state, "correlation_id", None)
+
+    logger.info(
+        "jobs_enqueue_sample_sleep start candidate_id=%s sleep_seconds=%s correlation_id=%s simulate_transient_fail=%s",
+        body.candidate_id,
+        body.sleep_seconds,
+        effective_correlation_id,
+        body.simulate_transient_fail,
+    )
     _check_broker()
 
     repo = AiRunRepository(session)
@@ -71,10 +88,15 @@ async def enqueue_sample_sleep(
     payload = {
         "ai_run_id": str(run.id),
         "sleep_seconds": body.sleep_seconds,
-        "correlation_id": body.correlation_id,
+        "correlation_id": effective_correlation_id,
         "simulate_transient_fail": body.simulate_transient_fail,
     }
     async_result = sample_sleep_ai_job.delay(payload)
+    logger.info(
+        "jobs_enqueue_sample_sleep enqueued ai_run_id=%s celery_task_id=%s",
+        run.id,
+        async_result.id,
+    )
     return SampleSleepEnqueueResponse(ai_run_id=run.id, celery_task_id=async_result.id)
 
 
@@ -83,9 +105,11 @@ async def get_ai_run_status(
     run_id: uuid.UUID,
     session: AsyncSession = Depends(get_db_session),
 ) -> AiRunStatusRead:
+    logger.info("jobs_get_ai_run_status run_id=%s", run_id)
     repo = AiRunRepository(session)
     row = await repo.get(run_id)
     if row is None:
+        logger.warning("jobs_get_ai_run_status not_found run_id=%s", run_id)
         raise HTTPException(status_code=404, detail="ai_run not found")
     return AiRunStatusRead.from_orm_row(row)
 

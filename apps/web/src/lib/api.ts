@@ -22,6 +22,7 @@ export type CandidateDto = {
 export type EnterResponse = {
   created: boolean;
   candidate: CandidateDto;
+  session_token?: string;
 };
 
 export async function enterWithEmail(body: {
@@ -57,12 +58,15 @@ export async function enterWithEmail(body: {
   }
   const obj = data as Record<string, unknown>;
   const created = obj.created === true;
+  const sessionToken =
+    typeof obj.session_token === "string" ? obj.session_token : undefined;
   const cand = obj.candidate as Record<string, unknown> | undefined;
   if (!cand || typeof cand.id !== "string") {
     throw new Error(`POST /candidates/enter: unexpected shape ${text}`);
   }
   return {
     created,
+    session_token: sessionToken,
     candidate: {
       id: cand.id,
       email: (cand.email as string | null) ?? null,
@@ -307,4 +311,154 @@ export async function fetchWiringSmokeStatus(
     throw new Error(`GET /wiring/smoke/${jobId} failed: ${res.status} ${text}`);
   }
   return data;
+}
+
+/** Candidate docs (uploaded_files metadata) */
+export type UploadedFileDto = {
+  id: string;
+  original_filename: string;
+  content_type: string | null;
+  byte_size: number | null;
+  status: string;
+};
+
+export async function listUploadedFiles(sessionToken?: string | null): Promise<
+  UploadedFileDto[]
+> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+
+  const res = await fetch(`${root}/files`, {
+    method: "GET",
+    cache: "no-store",
+    headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined,
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GET /files: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`GET /files failed: ${res.status} ${text}`);
+  }
+
+  // Allow either `{files:[...]}` or `[...]` shapes.
+  if (Array.isArray(data)) return data as UploadedFileDto[];
+  if (typeof data === "object" && data !== null) {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.files)) return obj.files as UploadedFileDto[];
+  }
+  return [];
+}
+
+export async function uploadFiles(
+  files: FileList,
+  sessionToken?: string | null,
+): Promise<UploadedFileDto[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+
+  const form = new FormData();
+  for (const file of Array.from(files)) {
+    form.append("files", file);
+  }
+
+  const res = await fetch(`${root}/files/upload`, {
+    method: "POST",
+    body: form,
+    headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined,
+    cache: "no-store",
+  });
+
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /files/upload: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`POST /files/upload failed: ${res.status} ${text}`);
+  }
+
+  if (Array.isArray(data)) return data as UploadedFileDto[];
+  if (typeof data === "object" && data !== null) {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.files)) return obj.files as UploadedFileDto[];
+    if (Array.isArray(obj.uploaded_files))
+      return obj.uploaded_files as UploadedFileDto[];
+  }
+  return [];
+}
+
+/** Chat */
+export type ChatThreadDto = { id: string };
+
+export type ChatMessageDto = {
+  id: string;
+  role: string;
+  content: string;
+  created_at?: string;
+};
+
+export async function createChatThread(
+  sessionToken?: string | null,
+): Promise<ChatThreadDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+
+  const res = await fetch(`${root}/chat/threads`, {
+    method: "POST",
+    cache: "no-store",
+    headers: sessionToken
+      ? { Authorization: `Bearer ${sessionToken}` }
+      : undefined,
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /chat/threads: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) throw new Error(`POST /chat/threads failed: ${res.status} ${text}`);
+
+  const obj = data as Record<string, unknown>;
+  const id =
+    (typeof obj.thread_id === "string" && obj.thread_id) ||
+    (typeof obj.id === "string" && obj.id) ||
+    null;
+  if (!id) throw new Error(`POST /chat/threads: missing thread id`);
+  return { id };
+}
+
+export async function fetchChatMessages(
+  threadId: string,
+  sessionToken?: string | null,
+): Promise<ChatMessageDto[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+
+  const res = await fetch(`${root}/chat/threads/${encodeURIComponent(threadId)}/messages`, {
+    method: "GET",
+    cache: "no-store",
+    headers: sessionToken
+      ? { Authorization: `Bearer ${sessionToken}` }
+      : undefined,
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GET /chat/threads/{id}/messages: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) throw new Error(`GET messages failed: ${res.status} ${text}`);
+
+  if (Array.isArray(data)) return data as ChatMessageDto[];
+  const obj = data as Record<string, unknown>;
+  if (Array.isArray(obj.messages)) return obj.messages as ChatMessageDto[];
+  return [];
 }

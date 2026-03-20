@@ -9,7 +9,6 @@ export function EmailLoginCard() {
   const { setSession } = useSession();
   const base = getApiBaseUrl();
   const [email, setEmail] = useState("");
-  const [fullName, setFullName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,7 +20,6 @@ export function EmailLoginCard() {
     try {
       const res = await enterWithEmail({
         email,
-        full_name: fullName.trim() || undefined,
       });
       setSession(res);
     } catch (err) {
@@ -62,22 +60,6 @@ export function EmailLoginCard() {
             onChange={(e) => setEmail(e.target.value)}
             className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
             placeholder="you@school.edu"
-            disabled={busy}
-          />
-        </div>
-        <div>
-          <label htmlFor="fullName" className="block text-xs font-medium text-neutral-700">
-            Full name <span className="font-normal text-neutral-500">(optional if you already have an account)</span>
-          </label>
-          <input
-            id="fullName"
-            name="fullName"
-            type="text"
-            autoComplete="name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
-            placeholder="Used when we create a new candidate"
             disabled={busy}
           />
         </div>

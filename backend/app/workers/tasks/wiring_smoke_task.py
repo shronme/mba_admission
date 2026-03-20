@@ -1,6 +1,8 @@
 import asyncio
 import logging
 
+import redis
+
 from app.core.celery_app import celery_app
 from app.core.config import settings
 from app.core.db import async_select_one
@@ -28,6 +30,7 @@ def wiring_smoke_job() -> dict:
     """
 
     try:
+        logger.info("wiring_smoke_job start")
         return asyncio.run(_wiring_smoke_async())
     except Exception as e:  # noqa: BLE001 - surface failure for smoke test
         logger.exception("Wiring smoke job failed")

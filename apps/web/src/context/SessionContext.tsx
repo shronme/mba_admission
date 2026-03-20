@@ -29,7 +29,10 @@ function readStoredSession(): SessionState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as EnterResponse;
+    // If the cached session is from before `session_token` existed,
+    // treat it as unauthenticated so we don't call protected endpoints with no auth header.
     if (!parsed?.candidate?.id) return null;
+    if (typeof parsed.session_token !== "string" || !parsed.session_token) return null;
     return parsed;
   } catch {
     return null;

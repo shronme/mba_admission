@@ -53,10 +53,21 @@ class AiJobTask(Task):
         cid = payload.get("correlation_id")
         return str(cid) if cid else None
 
+    def _ai_run_id(self, payload: dict[str, Any] | None) -> str | None:
+        if not payload:
+            return None
+        run_id = payload.get("ai_run_id")
+        return str(run_id) if run_id else None
+
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         payload = self._payload_dict(args, kwargs)
         cid = self._correlation_id(payload)
-        extra = {"celery_task_id": self.request.id, "correlation_id": cid or "-"}
+        run_id = self._ai_run_id(payload)
+        extra = {
+            "celery_task_id": self.request.id,
+            "correlation_id": cid or "-",
+            "ai_run_id": run_id or "-",
+        }
         log = logging.LoggerAdapter(logger, extra)
         log.info("task_start name=%s retries=%s", self.name, self.request.retries)
         try:
@@ -77,9 +88,14 @@ class AiJobTask(Task):
     ) -> None:
         payload = self._payload_dict(args, kwargs)
         cid = self._correlation_id(payload)
+        run_id = self._ai_run_id(payload)
         log = logging.LoggerAdapter(
             logger,
-            {"celery_task_id": task_id, "correlation_id": cid or "-"},
+            {
+                "celery_task_id": task_id,
+                "correlation_id": cid or "-",
+                "ai_run_id": run_id or "-",
+            },
         )
         log.exception("task_failure name=%s", self.name)
 

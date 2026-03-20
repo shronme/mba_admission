@@ -43,3 +43,4 @@ class CandidateEnterResponse(BaseModel):
 
     created: bool
     candidate: CandidateOut
+    session_token: str

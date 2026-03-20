@@ -1,4 +1,5 @@
 from celery.result import AsyncResult
+import logging
 from fastapi import APIRouter, HTTPException
 import redis
 
@@ -6,6 +7,7 @@ from app.core.config import settings
 
 from app.core.celery_app import celery_app
 router = APIRouter(prefix="/wiring", tags=["wiring"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("/smoke")
@@ -21,6 +23,7 @@ def enqueue_wiring_smoke_job() -> dict:
     try:
         redis.Redis.from_url(settings.redis_url).ping()
     except Exception as e:  # noqa: BLE001 - smoke-test diagnostics
+        logger.warning("wiring_smoke_enqueue redis_ping_failed error=%s", str(e))
         raise HTTPException(
             status_code=503,
             detail={
@@ -53,6 +56,11 @@ def enqueue_wiring_smoke_job() -> dict:
         # different default app in edge import/reload cases, which then points at the
         # wrong broker (often localhost -> connection refused inside Docker).
         async_result = celery_app.send_task("app.workers.tasks.wiring_smoke_job")
+        logger.info(
+            "wiring_smoke_enqueue enqueued job_id=%s state=%s",
+            async_result.id,
+            async_result.state,
+        )
         return {"job_id": async_result.id}
     except Exception as e:  # noqa: BLE001 - smoke-test diagnostics
         raise HTTPException(
@@ -76,5 +84,6 @@ def get_wiring_smoke_job(job_id: str) -> dict:
     elif async_result.failed():
         payload["error"] = str(async_result.result)
 
+    logger.info("wiring_smoke_poll job_id=%s state=%s", job_id, async_result.state)
     return payload
 

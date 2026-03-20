@@ -5,8 +5,15 @@ import logging
 from celery import Celery
 
 from app.core.config import settings
+from app.core.logging import configure_logging
 
 logger = logging.getLogger(__name__)
+
+from app.core.phoenix import configure_phoenix_tracing
+
+configure_logging()
+
+configure_phoenix_tracing()
 
 celery_app = Celery(
     "app",

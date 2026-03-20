@@ -40,12 +40,27 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       # Next.js dev server (browser → API). Override in production with your deployed web origin(s).
-      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://[::1]:3000"
+      CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000,http://0.0.0.0:3000,http://[::1]:3000"
       # Keep health lightweight by default; toggle if you want.
       HEALTHCHECK_DB: "false"
       HEALTHCHECK_REDIS: "false"
+      # Phoenix Cloud / OTEL tracing (optional)
+      # Set these to enable traces:
+      # - PHOENIX_COLLECTOR_ENDPOINT (HTTP endpoint like .../v1/traces)
+      # - PHOENIX_API_KEY (optional)
+      # - PHOENIX_PROJECT_NAME (optional)
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT}
+      PHOENIX_API_KEY: ${PHOENIX_API_KEY}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-mba_admissions}
+      # DSPy / OpenAI (enable by providing OPENAI_API_KEY and setting DSPY_MODE=openai)
+      # Leave unset to keep deterministic mock behavior.
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DSPY_MODE: ${DSPY_MODE:-mock}
+      DSPY_MODEL: ${DSPY_MODEL:-openai/gpt-4o-mini}
     ports:
       - "8000:8000"
+    volumes:
+      - local_bucket:/app/.local_bucket
 
   worker:
     build:
@@ -65,9 +80,14 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       CELERY_TASK_DEFAULT_QUEUE: default
+      # Phoenix Cloud / OTEL tracing (optional)
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT}
+      PHOENIX_API_KEY: ${PHOENIX_API_KEY}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-mba_admissions}
     restart: unless-stopped
 
 volumes:
   redis_data:
   postgres_data:
+  local_bucket:
 

@@ -19,7 +19,7 @@ case "$ROLE" in
     exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
     ;;
   worker)
-    exec celery -A app.core.celery_app worker -l info
+    exec celery -A app.core.celery_app:celery_app worker -l info
     ;;
   *)
     echo "docker-entrypoint: unknown APP_ROLE='$ROLE' (use 'web' or 'worker')" >&2

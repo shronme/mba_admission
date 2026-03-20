@@ -27,6 +27,13 @@ def sample_sleep_ai_job(self, payload: dict) -> dict:
     """
 
     data = SampleSleepJobPayload.model_validate(payload)
+    logger.info(
+        "sample_sleep task_start ai_run_id=%s sleep_seconds=%s simulate_transient_fail=%s correlation_id=%s",
+        data.ai_run_id,
+        data.sleep_seconds,
+        data.simulate_transient_fail,
+        data.correlation_id,
+    )
 
     attach_worker_meta_to_ai_run(
         ai_run_id=data.ai_run_id,
@@ -63,6 +70,11 @@ def sample_sleep_ai_job(self, payload: dict) -> dict:
             },
         )
 
+    logger.info(
+        "sample_sleep task_succeeded ai_run_id=%s celery_task_id=%s",
+        data.ai_run_id,
+        self.request.id,
+    )
     return {
         "ai_run_id": str(data.ai_run_id),
         "status": "succeeded",
