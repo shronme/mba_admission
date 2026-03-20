@@ -35,6 +35,15 @@ class FileStatus(StrEnum):
     DELETED = "deleted"
 
 
+class DocumentType(StrEnum):
+    CV = "cv"
+    LIFE_STORY = "life_story"
+    RECOMMENDATION_LETTER = "recommendation_letter"
+    GRADE_SHEET = "grade_sheet"
+    IRRELEVANT = "irrelevant"
+    UNCLASSIFIED = "unclassified"
+
+
 class StrategyType(StrEnum):
     SCHOOL_SELECTION = "school_selection"
     TIMELINE = "timeline"

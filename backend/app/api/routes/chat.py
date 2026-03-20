@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, AsyncGenerator
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +19,64 @@ from app.db.enums import ChatThreadStatus, FileStatus, MessageRole
 from app.db.models.chat import ChatMessage, ChatThread
 from app.db.models.candidate import Candidate, CandidateProfile
 from app.db.models.files import UploadedFile
+from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.chat_repo import ChatRepository
-from app.dspy.pipeline import generate_assistant_response
+from app.dspy.pipeline import generate_assistant_response, generate_initial_greeting
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 logger = logging.getLogger(__name__)
+tracer = otel_trace.get_tracer(__name__)
+
+
+async def _retrieve_doc_snippets(
+    *,
+    session: AsyncSession,
+    candidate_id: UUID,
+    user_message: str,
+) -> list[str]:
+    """
+    Return relevant document snippets for the given user message.
+
+    Uses pgvector semantic search when OPENAI_API_KEY is available; falls back
+    to naive full-text injection (up to 3 documents' extracted_text) otherwise.
+    """
+    api_key = os.getenv("OPENAI_API_KEY")
+    if api_key:
+        try:
+            from openai import AsyncOpenAI
+            from app.core.vector_store import search_async
+
+            client = AsyncOpenAI(api_key=api_key)
+            resp = await client.embeddings.create(
+                model="text-embedding-3-small", input=user_message
+            )
+            query_embedding = resp.data[0].embedding
+            snippets = await search_async(
+                session, candidate_id=candidate_id, query_embedding=query_embedding
+            )
+            logger.debug(
+                "chat_rag_search candidate_id=%s snippets=%s", candidate_id, len(snippets)
+            )
+            return snippets
+        except Exception:
+            logger.exception(
+                "chat_rag_search_failed candidate_id=%s — falling back to naive injection",
+                candidate_id,
+            )
+
+    # Fallback: inject raw extracted_text from up to 3 READY files.
+    docs_result = await session.execute(
+        select(UploadedFile)
+        .where(UploadedFile.candidate_id == candidate_id)
+        .where(UploadedFile.status == FileStatus.READY)
+        .limit(3)
+    )
+    snippets = []
+    for d in docs_result.scalars().all():
+        if isinstance(d.extra, dict) and isinstance(d.extra.get("extracted_text"), str):
+            snippets.append(d.extra["extracted_text"])
+    return snippets
 
 
 class ChatStreamRequest(BaseModel):
@@ -54,69 +108,6 @@ async def _ensure_thread_owned(
     return thread
 
 
-def _guardrail_off_topic(user_text: str) -> bool:
-    t = user_text.lower()
-    # Simple MVP guardrails; replace with DSPy-based classification later.
-    if any(
-        kw in t
-        for kw in (
-            "write my personal statement",
-            "write the essay",
-            "write an essay",
-            "draft a full essay",
-            "complete the essay",
-        )
-    ):
-        return False  # not off-topic; it's a disallowed request we handle separately
-    if any(kw in t for kw in ("calculus", "photosynthesis", "quantum", "chemistry")):
-        return True
-    return False
-
-
-def _guardrail_disallowed_full_essay(user_text: str) -> bool:
-    t = user_text.lower()
-    return any(
-        kw in t
-        for kw in (
-            "write my personal statement",
-            "write the essay",
-            "write an essay",
-            "draft a full essay",
-            "complete the essay",
-        )
-    )
-
-
-def _stage_based_assistant_text(*, file_count: int, user_text: str) -> str:
-    if _guardrail_disallowed_full_essay(user_text):
-        return (
-            "I can help you brainstorm, outline, and improve your draft, but I can’t write a full essay for you. "
-            "If you paste the prompt and share 2-3 bullet points from your own story, I’ll help structure a strong outline."
-        )
-
-    if _guardrail_off_topic(user_text):
-        return (
-            "I can only help with graduate admissions (e.g., documents, goals, school strategy, and essay planning). "
-            "Tell me what program/cycle you’re targeting and what documents you have."
-        )
-
-    if file_count <= 0:
-        return (
-            "Great — to get started, please upload any relevant documents you have (life story notes, grades/transcripts, resume, "
-            "recommendations, or anything you think shows your background). After uploading, tell me your top US grad goals: "
-            "which schools (or types), your target timeline/round, and the main story you want to be known for."
-        )
-
-    return (
-        "Thanks for the documents. Now, tell me your Grad school goals for a top US university: \n"
-        "1) Target schools (or MBA/MA/other + any names)\n"
-        "2) Your timeline (application cycle and preferred round)\n"
-        "3) 2-3 themes you want your application to communicate (leadership, impact, craft)\n"
-        "4) Any constraints (work schedule, GPA range, test plan)\n\n"
-        "Then I’ll propose a personalized roadmap and next steps."
-    )
-
-
 @router.post("/threads", response_model=None)
 async def create_thread(
     candidate_id: UUID = Depends(get_candidate_id_from_bearer_token),
@@ -130,13 +121,27 @@ async def create_thread(
         status=ChatThreadStatus.ACTIVE,
         extra={"stage": "intake"},
     )
-    # Initial assistant message for intake (DSPy pipeline driven).
-    initial = generate_assistant_response(
-        user_message="start intake",
-        file_count=0,
-        candidate_profile=None,
-        docs_snippets=[],
-        recent_messages=[],
+    # Load candidate + profile so the greeting can resume from where they left off.
+    candidate = (
+        await session.execute(select(Candidate).where(Candidate.id == candidate_id))
+    ).scalar_one()
+    profile = (
+        await session.execute(
+            select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id)
+        )
+    ).scalar_one_or_none()
+    file_count_res = await session.execute(
+        select(func.count(UploadedFile.id))
+        .where(UploadedFile.candidate_id == candidate_id)
+        .where(UploadedFile.status == FileStatus.READY)
+    )
+    greeting_file_count = int(file_count_res.scalar_one() or 0)
+
+    # Initial assistant message — personalised to existing profile progress.
+    initial, _ = generate_initial_greeting(
+        candidate_name=candidate.full_name,
+        existing_attributes=profile.attributes if profile else None,
+        has_files=greeting_file_count > 0,
     )
     await chat_repo.add_message(
         thread.id,
@@ -229,16 +234,11 @@ async def stream_assistant_response(
         "attributes": profile.attributes if profile is not None else None,
     }
 
-    docs_result = await session.execute(
-        select(UploadedFile).where(UploadedFile.candidate_id == candidate_id).where(UploadedFile.status == FileStatus.READY)
+    docs_snippets: list[str] = await _retrieve_doc_snippets(
+        session=session,
+        candidate_id=candidate_id,
+        user_message=body.content,
     )
-    docs = list(docs_result.scalars().all())
-    docs_snippets: list[str] = []
-    for d in docs:
-        if isinstance(d.extra, dict) and isinstance(d.extra.get("extracted_text"), str):
-            docs_snippets.append(d.extra["extracted_text"])
-        if len(docs_snippets) >= 3:
-            break
 
     recent_result = await session.execute(
         select(ChatMessage)
@@ -253,13 +253,21 @@ async def stream_assistant_response(
         if m.content
     ]
 
-    full_text = generate_assistant_response(
-        user_message=body.content,
-        file_count=file_count,
-        candidate_profile=candidate_profile,
-        docs_snippets=docs_snippets,
-        recent_messages=recent_messages,
-    )
+    with tracer.start_as_current_span(
+        "chat.pipeline",
+        attributes={
+            "openinference.span.kind": "CHAIN",
+            "user.id": str(candidate_id),
+            "session.id": str(thread_id),
+        },
+    ):
+        full_text, profile_updates = generate_assistant_response(
+            user_message=body.content,
+            file_count=file_count,
+            candidate_profile=candidate_profile,
+            docs_snippets=docs_snippets,
+            recent_messages=recent_messages,
+        )
 
     async def gen() -> AsyncGenerator[str, None]:
         nonlocal full_text
@@ -277,6 +285,23 @@ async def stream_assistant_response(
             assistant_msg.content = acc
             session.add(assistant_msg)
             await session.commit()
+
+            # Persist extracted profile updates (non-blocking — best-effort).
+            if profile_updates:
+                try:
+                    candidate_repo = CandidateRepository(session)
+                    await candidate_repo.merge_profile_attributes(candidate_id, profile_updates)
+                    await session.commit()
+                    logger.info(
+                        "chat_profile_updated candidate_id=%s keys=%s",
+                        candidate_id,
+                        list(profile_updates.keys()),
+                    )
+                except Exception:
+                    logger.exception(
+                        "chat_profile_update_failed candidate_id=%s", candidate_id
+                    )
+
             logger.info("chat_stream_complete candidate_id=%s thread_id=%s", candidate_id, thread_id)
         except Exception:
             logger.exception(

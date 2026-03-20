@@ -52,6 +52,30 @@ class CandidateRepository(BaseRepository):
         await self.session.flush()
         return profile
 
+    async def merge_profile_attributes(
+        self,
+        candidate_id: uuid.UUID,
+        updates: dict,
+    ) -> CandidateProfile:
+        """
+        Shallow-merge `updates` into CandidateProfile.attributes without overwriting
+        existing keys. Creates the profile row if it does not yet exist.
+        """
+        result = await self.session.execute(
+            select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id),
+        )
+        profile = result.scalar_one_or_none()
+        if profile is None:
+            profile = CandidateProfile(candidate_id=candidate_id, attributes={})
+            self.session.add(profile)
+
+        existing: dict = profile.attributes or {}
+        # Only add keys that are not already present (preserve richer existing data)
+        merged = {**updates, **existing}
+        profile.attributes = merged
+        await self.session.flush()
+        return profile
+
     async def get_by_id(self, candidate_id: uuid.UUID) -> Candidate | None:
         result = await self.session.execute(
             select(Candidate).where(Candidate.id == candidate_id),

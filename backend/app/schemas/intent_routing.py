@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class PrimaryIntent(StrEnum):
     INTAKE_DOCS = "intake_docs"
     INTAKE_GOALS = "intake_goals"
+    INTAKE_INTERVIEW = "intake_interview"
     ADMISSIONS_HELP = "admissions_help"
     OFF_TOPIC = "off_topic"
 
@@ -16,6 +17,7 @@ class SecondaryFlag(StrEnum):
     DISALLOWED_FULL_ESSAY = "disallowed_full_essay"
     NEEDS_DOC_UPLOAD = "needs_doc_upload"
     NEEDS_GOALS_CLARIFICATION = "needs_goals_clarification"
+    NO_FILES = "no_files"
 
 
 class IntentRoutingOutput(BaseModel):

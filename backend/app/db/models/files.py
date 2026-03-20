@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.enums import FileStatus
+from app.db.enums import DocumentType, FileStatus
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -40,6 +40,15 @@ class UploadedFile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         default=FileStatus.READY,
         insert_default=FileStatus.READY,
+    )
+    document_type: Mapped[DocumentType | None] = mapped_column(
+        SQLEnum(
+            DocumentType,
+            name="document_type",
+            native_enum=True,
+            values_callable=lambda obj: [e.value for e in obj],
+        ),
+        nullable=True,
     )
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 

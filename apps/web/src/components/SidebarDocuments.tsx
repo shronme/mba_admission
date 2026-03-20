@@ -34,6 +34,22 @@ export function SidebarDocuments({
     })();
   }, [sessionToken, canLoad]);
 
+  // Poll every 3 s while any file is still processing so the status updates
+  // automatically once the background worker finishes.
+  useEffect(() => {
+    const hasProcessing = files.some((f) => f.status === "uploading");
+    if (!hasProcessing || !canLoad) return;
+    const id = setTimeout(async () => {
+      try {
+        const out = await listUploadedFiles(sessionToken ?? null);
+        setFiles(out);
+      } catch {
+        // silently ignore polling errors
+      }
+    }, 3000);
+    return () => clearTimeout(id);
+  }, [files, canLoad, sessionToken]);
+
   const onFilesSelected = async (selected: FileList | null) => {
     if (!selected || selected.length === 0) return;
     setBusy(true);

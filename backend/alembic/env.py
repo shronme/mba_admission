@@ -9,6 +9,9 @@ from sqlalchemy import create_engine, pool
 from app.core.config import settings
 from app.db.base import Base
 
+# Register pgvector types with SQLAlchemy so Alembic can render Vector columns.
+import pgvector.sqlalchemy  # noqa: F401
+
 # Register models on Base.metadata
 import app.db.models  # noqa: F401
 

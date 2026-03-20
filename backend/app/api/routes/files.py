@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import io
 import logging
 from typing import Any
 from uuid import UUID
@@ -29,54 +28,8 @@ def _file_to_dto(f: UploadedFile) -> dict[str, Any]:
         "content_type": f.content_type,
         "byte_size": f.byte_size,
         "status": f.status.value,
+        "document_type": f.document_type.value if f.document_type else None,
     }
-
-
-def _extract_text_from_bytes(
-    *,
-    data: bytes,
-    filename: str,
-    content_type: str | None,
-    max_chars: int = 20_000,
-) -> tuple[str | None, list[str] | None]:
-    content_type_l = (content_type or "").lower()
-    fn_l = filename.lower()
-
-    extracted: str | None = None
-    if content_type_l.startswith("text/") or fn_l.endswith((".txt", ".md", ".csv")):
-        extracted = data.decode("utf-8", errors="ignore")
-    elif content_type_l == "application/pdf" or fn_l.endswith(".pdf"):
-        try:
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(data))
-            parts: list[str] = []
-            for page in reader.pages:
-                t = page.extract_text() or ""
-                parts.append(t)
-            extracted = "\n".join(parts)
-        except Exception:
-            logger.exception(
-                "file_text_extraction_failed kind=pdf filename=%s content_type=%s",
-                filename,
-                content_type,
-            )
-            extracted = None
-
-    if extracted is None:
-        return None, None
-
-    cleaned = extracted.strip()
-    if not cleaned:
-        return None, None
-
-    if len(cleaned) > max_chars:
-        cleaned = cleaned[:max_chars]
-
-    # Light chunking for later context injection (no embeddings yet).
-    chunks = [c.strip() for c in cleaned.split("\n\n") if c.strip()]
-    chunks = chunks[:25]
-    return cleaned, chunks
 
 
 @router.get("", response_model=None)
@@ -147,26 +100,9 @@ async def upload_files(
                 content_type=content_type,
             )
 
-            extracted_text, chunks = _extract_text_from_bytes(
-                data=data,
-                filename=original_filename,
-                content_type=content_type,
-            )
-
             row.byte_size = byte_size
             row.storage_uri = storage_uri
-            row.status = FileStatus.READY
-            row.extra = {
-                **(row.extra or {}),
-                "extracted_text": extracted_text,
-                "extracted_chunks": chunks,
-            }
-            logger.info(
-                "files_upload file_ready file_id=%s extracted_chars=%s chunks=%s",
-                row.id,
-                len(extracted_text) if extracted_text else 0,
-                len(chunks) if chunks else 0,
-            )
+            # Status stays UPLOADING until the background task completes.
         except Exception as e:  # noqa: BLE001
             row.status = FileStatus.FAILED
             row.extra = {"error": str(e)}
@@ -180,6 +116,15 @@ async def upload_files(
         uploaded.append(row)
 
     await session.commit()
+
+    # Enqueue background processing for every successfully stored file.
+    from app.workers.tasks.document_processing import process_uploaded_document
+
+    for f in uploaded:
+        if f.status == FileStatus.UPLOADING:
+            process_uploaded_document.delay(str(f.id))
+            logger.info("files_upload task_enqueued file_id=%s", f.id)
+
     logger.info("files_upload done candidate_id=%s count=%s", candidate_id, len(uploaded))
     return {"files": [_file_to_dto(f) for f in uploaded]}
 

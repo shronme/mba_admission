@@ -5,7 +5,7 @@ services:
       - redis_data:/data
 
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: mba_admissions
       POSTGRES_USER: postgres
@@ -60,6 +60,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend:/app/backend
       - local_bucket:/app/.local_bucket
 
   worker:
@@ -84,6 +85,13 @@ services:
       PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT}
       PHOENIX_API_KEY: ${PHOENIX_API_KEY}
       PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-mba_admissions}
+      # DSPy / OpenAI (required for document classification and embedding)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      DSPY_MODE: ${DSPY_MODE:-mock}
+      DSPY_MODEL: ${DSPY_MODEL:-openai/gpt-4o-mini}
+    volumes:
+      - ./backend:/app/backend
+      - local_bucket:/app/.local_bucket
     restart: unless-stopped
 
 volumes:

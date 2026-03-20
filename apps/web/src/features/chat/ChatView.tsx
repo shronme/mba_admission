@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import {
   createChatThread,
@@ -55,6 +57,18 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
     if (!threadId) return;
     void loadMessages(threadId).catch((e) => setError(String(e)));
   }, [threadId, loadMessages]);
+
+  // Poll for new messages every 5 s so background notifications (e.g. document
+  // upload acknowledgements posted by the worker) appear without user action.
+  useEffect(() => {
+    if (!threadId || busy) return;
+    const id = setInterval(() => {
+      void loadMessages(threadId).catch(() => {
+        // silently ignore polling errors
+      });
+    }, 5000);
+    return () => clearInterval(id);
+  }, [threadId, busy, loadMessages]);
 
   useEffect(() => {
     // Keep the transcript pinned to bottom while streaming.
@@ -181,7 +195,41 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
                         : "max-w-[85%] rounded-2xl rounded-bl-sm bg-neutral-100 px-4 py-3 text-sm text-neutral-900"
                     }
                   >
-                    {m.content || (isUser ? " " : "…")}
+                    {isUser ? (
+                      m.content || " "
+                    ) : m.content ? (
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => (
+                            <p className="mb-2 last:mb-0">{children}</p>
+                          ),
+                          strong: ({ children }) => (
+                            <strong className="font-semibold">{children}</strong>
+                          ),
+                          em: ({ children }) => (
+                            <em className="italic text-neutral-600">{children}</em>
+                          ),
+                          ul: ({ children }) => (
+                            <ul className="mb-2 ml-4 list-disc space-y-1 last:mb-0">{children}</ul>
+                          ),
+                          ol: ({ children }) => (
+                            <ol className="mb-2 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>
+                          ),
+                          li: ({ children }) => (
+                            <li className="leading-snug">{children}</li>
+                          ),
+                          code: ({ children }) => (
+                            <code className="rounded bg-neutral-200 px-1 py-0.5 text-xs">{children}</code>
+                          ),
+                          hr: () => <hr className="my-2 border-neutral-300" />,
+                        }}
+                      >
+                        {m.content}
+                      </ReactMarkdown>
+                    ) : (
+                      "…"
+                    )}
                   </div>
                 </div>
               );
