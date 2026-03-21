@@ -25,6 +25,8 @@ class CandidateProfileOut(BaseModel):
     headline: str | None = None
     summary: str | None = None
     attributes: dict[str, Any] | None = None
+    profile_complete: bool = False
+    completeness_score: int = 0  # persisted by ProfileAgent; read directly from DB column
 
 
 class CandidateOut(BaseModel):
@@ -35,6 +37,7 @@ class CandidateOut(BaseModel):
     full_name: str
     program_type: str
     status: str
+    stage: str
     profile: CandidateProfileOut | None = None
 
 

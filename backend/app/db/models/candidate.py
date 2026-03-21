@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Enum as SQLEnum, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
-from app.db.enums import CandidateStatus, ProgramType
+from app.db.enums import CandidateStage, CandidateStatus, ProgramType
 from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 
@@ -31,6 +31,12 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         default=CandidateStatus.ACTIVE,
         insert_default=CandidateStatus.ACTIVE,
+    )
+    stage: Mapped[CandidateStage] = mapped_column(
+        SQLEnum(CandidateStage, name="candidate_stage", native_enum=True),
+        nullable=False,
+        default=CandidateStage.INTAKE,
+        insert_default=CandidateStage.INTAKE,
     )
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
@@ -77,5 +83,11 @@ class CandidateProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     headline: Mapped[str | None] = mapped_column(String(512), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    profile_complete: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, insert_default=False
+    )
+    completeness_score: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, insert_default=0
+    )
 
     candidate: Mapped[Candidate] = relationship(back_populates="profile")

@@ -3,11 +3,13 @@
  * Use the **API** service’s public URL — not the Next.js frontend URL (GET /health exists only on FastAPI).
  */
 
-/** Candidate + profile from POST /candidates/enter */
+/** Candidate + profile from POST /candidates/enter or GET /candidates/me */
 export type CandidateProfileDto = {
   headline: string | null;
   summary: string | null;
   attributes: Record<string, unknown> | null;
+  profile_complete: boolean;
+  completeness_score: number;
 };
 
 export type CandidateDto = {
@@ -78,6 +80,39 @@ export async function enterWithEmail(body: {
           ? (cand.profile as CandidateProfileDto)
           : null,
     },
+  };
+}
+
+export async function fetchCandidateProfile(
+  sessionToken: string,
+): Promise<CandidateDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GET /candidates/me: invalid JSON (${res.status})`);
+  }
+  if (!res.ok)
+    throw new Error(`GET /candidates/me failed: ${res.status} ${text}`);
+  const cand = data as Record<string, unknown>;
+  return {
+    id: String(cand.id ?? ""),
+    email: (cand.email as string | null) ?? null,
+    full_name: String(cand.full_name ?? ""),
+    program_type: String(cand.program_type ?? ""),
+    status: String(cand.status ?? ""),
+    profile:
+      cand.profile !== null && typeof cand.profile === "object"
+        ? (cand.profile as CandidateProfileDto)
+        : null,
   };
 }
 

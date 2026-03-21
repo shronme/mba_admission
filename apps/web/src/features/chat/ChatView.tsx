@@ -6,10 +6,12 @@ import remarkGfm from "remark-gfm";
 
 import {
   createChatThread,
+  fetchCandidateProfile,
   fetchChatMessages,
   getApiBaseUrl,
   type ChatMessageDto,
 } from "@/lib/api";
+import { STAGES } from "@/components/StageProgressBar";
 
 type LocalMessage = ChatMessageDto & { _local?: boolean };
 
@@ -20,13 +22,23 @@ function makeLocalId() {
     : `local_${Math.random().toString(16).slice(2)}`;
 }
 
-export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
+export function ChatView({
+  sessionToken,
+  currentStage = 1,
+  onProfileUpdate,
+}: {
+  sessionToken?: string | null;
+  currentStage?: number;
+  onProfileUpdate?: (intakeComplete: boolean) => void;
+}) {
   const base = getApiBaseUrl();
   const [threadId, setThreadId] = useState<string | null>(null);
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
+  const [intakeComplete, setIntakeComplete] = useState(false);
+  const [intakeScore, setIntakeScore] = useState(0);
 
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -42,6 +54,20 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
     [sessionToken],
   );
 
+  const refreshIntakeProgress = useCallback(async () => {
+    if (!sessionToken) return;
+    try {
+      const cand = await fetchCandidateProfile(sessionToken);
+      const profile = cand.profile;
+      const complete = profile?.profile_complete ?? false;
+      setIntakeComplete(complete);
+      setIntakeScore(profile?.completeness_score ?? 0);
+      onProfileUpdate?.(complete);
+    } catch {
+      // silently ignore — progress bar just won't update
+    }
+  }, [sessionToken, onProfileUpdate]);
+
   const ensureThread = useCallback(async () => {
     if (!base) return;
     if (threadId) return;
@@ -56,19 +82,18 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
   useEffect(() => {
     if (!threadId) return;
     void loadMessages(threadId).catch((e) => setError(String(e)));
-  }, [threadId, loadMessages]);
+    void refreshIntakeProgress();
+  }, [threadId, loadMessages, refreshIntakeProgress]);
 
-  // Poll for new messages every 5 s so background notifications (e.g. document
-  // upload acknowledgements posted by the worker) appear without user action.
+  // Poll for new messages and intake progress every 5 s.
   useEffect(() => {
     if (!threadId || busy) return;
     const id = setInterval(() => {
-      void loadMessages(threadId).catch(() => {
-        // silently ignore polling errors
-      });
+      void loadMessages(threadId).catch(() => {});
+      void refreshIntakeProgress();
     }, 5000);
     return () => clearInterval(id);
-  }, [threadId, busy, loadMessages]);
+  }, [threadId, busy, loadMessages, refreshIntakeProgress]);
 
   useEffect(() => {
     // Keep the transcript pinned to bottom while streaming.
@@ -143,6 +168,7 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
 
       // Refresh from DB so roles/status match canonical state.
       await loadMessages(threadId);
+      void refreshIntakeProgress();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -158,15 +184,59 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
     );
   }
 
+  const stageName = STAGES[Math.max(0, Math.min(currentStage - 1, STAGES.length - 1))].name;
+
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-neutral-200 px-4 py-3">
-        <div className="text-sm font-semibold text-neutral-900">
-          Admissions Chat
+      {/* Chat panel header */}
+      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-neutral-900">
+              Advising Session
+            </span>
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
+              {stageName}
+            </span>
+          </div>
+          <div className="mt-0.5 text-[11px] text-neutral-400">
+            Upload documents on the right, then chat here about your goals.
+          </div>
         </div>
-        <div className="mt-0.5 text-xs text-neutral-500">
-          Upload relevant documents, then tell us your goals. The assistant will
-          stay within admissions/help topics.
+        <div className="flex items-center gap-1.5">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="text-[11px] text-neutral-400">
+            {intakeComplete ? "Profile complete" : "Active"}
+          </span>
+        </div>
+      </div>
+
+      {/* Profile completeness bar */}
+      <div className="border-b border-neutral-100 px-4 py-2">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="text-[11px] text-neutral-400">
+            {intakeComplete ? "Profile complete" : `Profile ${intakeScore}% complete`}
+          </span>
+          {intakeComplete && (
+            <span className="text-[11px] font-semibold text-emerald-600">
+              ✓ Ready for research
+            </span>
+          )}
+        </div>
+        <div className="h-1 w-full overflow-hidden rounded-full bg-neutral-100">
+          <div
+            className={[
+              "h-full rounded-full transition-all duration-700",
+              intakeComplete
+                ? "bg-emerald-500"
+                : intakeScore >= 75
+                  ? "bg-indigo-500"
+                  : intakeScore >= 40
+                    ? "bg-indigo-400"
+                    : "bg-neutral-300",
+            ].join(" ")}
+            style={{ width: `${Math.min(100, Math.max(0, intakeScore))}%` }}
+          />
         </div>
       </div>
 
@@ -251,7 +321,7 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
         </div>
       )}
 
-      <div className="border-t border-neutral-200 px-4 py-3">
+      <div className="border-t border-neutral-200 px-4 pb-2 pt-3">
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <label className="sr-only" htmlFor="chatInput">
@@ -261,7 +331,13 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
               id="chatInput"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Type your message…"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              placeholder="Tell me about yourself, your goals, or ask anything about the admissions process…"
               className="min-h-[44px] w-full resize-none rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
               disabled={busy}
             />
@@ -275,6 +351,10 @@ export function ChatView({ sessionToken }: { sessionToken?: string | null }) {
             Send
           </button>
         </div>
+        <p className="mt-1.5 text-[10px] text-neutral-400">
+          Press <kbd className="rounded bg-neutral-100 px-1 font-mono">Enter</kbd> to send ·{" "}
+          <kbd className="rounded bg-neutral-100 px-1 font-mono">Shift+Enter</kbd> for new line
+        </p>
       </div>
     </div>
   );

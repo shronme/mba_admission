@@ -138,10 +138,12 @@ async def create_thread(
     greeting_file_count = int(file_count_res.scalar_one() or 0)
 
     # Initial assistant message — personalised to existing profile progress.
+    greeting_profile_complete = bool(profile.profile_complete) if profile else False
     initial, _ = generate_initial_greeting(
         candidate_name=candidate.full_name,
         existing_attributes=profile.attributes if profile else None,
         has_files=greeting_file_count > 0,
+        profile_complete=greeting_profile_complete,
     )
     await chat_repo.add_message(
         thread.id,
@@ -229,6 +231,7 @@ async def stream_assistant_response(
     # Memory / context injection (MVP): candidate profile + extracted doc snippets + recent messages.
     candidate = (await session.execute(select(Candidate).where(Candidate.id == candidate_id))).scalar_one()
     profile = (await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))).scalar_one_or_none()
+    profile_complete: bool = bool(profile.profile_complete) if profile is not None else False
     candidate_profile: dict[str, Any] = {
         "full_name": candidate.full_name,
         "attributes": profile.attributes if profile is not None else None,
@@ -261,12 +264,13 @@ async def stream_assistant_response(
             "session.id": str(thread_id),
         },
     ):
-        full_text, profile_updates = generate_assistant_response(
+        full_text, profile_updates, is_now_complete, new_score = generate_assistant_response(
             user_message=body.content,
             file_count=file_count,
             candidate_profile=candidate_profile,
             docs_snippets=docs_snippets,
             recent_messages=recent_messages,
+            profile_complete=profile_complete,
         )
 
     async def gen() -> AsyncGenerator[str, None]:
@@ -286,16 +290,26 @@ async def stream_assistant_response(
             session.add(assistant_msg)
             await session.commit()
 
-            # Persist extracted profile updates (non-blocking — best-effort).
-            if profile_updates:
+            # Persist extracted profile updates, completeness flag, and quality score (best-effort).
+            score_changed = new_score >= 0  # -1 sentinel means no re-evaluation happened
+            if profile_updates or (is_now_complete and not profile_complete) or score_changed:
                 try:
                     candidate_repo = CandidateRepository(session)
-                    await candidate_repo.merge_profile_attributes(candidate_id, profile_updates)
+                    if profile_updates:
+                        await candidate_repo.merge_profile_attributes(candidate_id, profile_updates)
+                    if is_now_complete or score_changed:
+                        await candidate_repo.set_profile_complete(
+                            candidate_id,
+                            complete=is_now_complete,
+                            score=new_score if score_changed else None,
+                        )
                     await session.commit()
                     logger.info(
-                        "chat_profile_updated candidate_id=%s keys=%s",
+                        "chat_profile_updated candidate_id=%s keys=%s is_complete=%s score=%s",
                         candidate_id,
                         list(profile_updates.keys()),
+                        is_now_complete,
+                        new_score,
                     )
                 except Exception:
                     logger.exception(

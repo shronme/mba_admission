@@ -4,55 +4,73 @@ import json
 
 import dspy
 
+from app.dspy.profile_agent import (
+    CANDIDATE_INPUT_ATTRIBUTES,
+    _ATTRIBUTE_SCHEMA_JSON,
+)
+
 _NO_FILES_NUDGE = (
     "\n\n_(Tip: uploading your resume, transcripts, or any background notes "
     "will let me give you much more tailored guidance.)_"
 )
 
-# Ordered list of (attribute_key, question) pairs that drive the interview.
-# The key is used to check whether the area has already been captured in the
-# candidate's profile attributes so we don't re-ask covered ground.
-INTERVIEW_QUESTIONS: list[tuple[str, str]] = [
-    ("career_path", "Walk me through your career path — where did you start and how did you get to where you are now?"),
-    ("undergrad_degree", "Why did you choose your undergrad degree or field of study?"),
-    ("role_transitions", "You've moved between roles (or industries) — what drove those transitions?"),
-    ("post_mba_goals", "What do you actually want to do after the program? Be as specific as you can."),
-    ("motivation_timing", "Why now? What's changed or is changing that makes this the right moment to pursue the degree?"),
-    ("why_not_current_path", "Why not stay on your current path? What can't you achieve without the degree?"),
-    ("evidence_for_goals", "What's the strongest evidence that you can achieve the goals you just described?"),
-    ("identified_weaknesses", "What's weak or missing in your profile right now — and how are you thinking about addressing it?"),
-]
+# Plain-English question prompts for the mock interviewer — kept separate from the
+# attribute schema so we never splice a completeness definition into a question.
+_MOCK_QUESTION_HINTS: dict[str, str] = {
+    "core_identity": "how would you describe yourself as a professional — beyond your job title?",
+    "domain_base": "what industry and functional area have you been working in, and how long?",
+    "core_strengths": "what are two or three strengths you'd say colleagues consistently rely on you for?",
+    "differentiation_layer": "is there a personal experience or value that shapes how you show up at work?",
+    "intellectual_working_style": "how do you typically approach a complex or ambiguous problem?",
+    "motivation": "what's driving you to pursue an MBA right now, specifically?",
+    "core_tension": "where do you feel the biggest gap between where you are today and where you want to go?",
+    "transferable_assets": "what skills or experiences from your background do you think translate most directly to your target direction?",
+    "risks": "are there any parts of your profile — GPA, work history, career pivot — that you think admissions committees will scrutinise?",
+}
 
 
 class OpenAIIntakeInterviewSignature(dspy.Signature):
     """
     You are an experienced MBA admissions coach conducting a structured intake interview.
 
-    CRITICAL RULE — STAY ON THE CURRENT QUESTION:
-    The field `last_question_asked` tells you exactly what you asked the candidate last turn.
-    Before moving to any new topic, you MUST verify that the candidate's answer actually
-    addresses that specific question. Examples of NOT answering:
-    - Asked "Why did you choose your undergrad degree?" → candidate says "I want to be an
-      entrepreneur" → this does NOT answer the undergrad question; re-ask it.
-    - Asked "Walk me through your career path" → candidate says "I want an MBA" → does not
-      address career history; re-ask it.
-    If the answer is off-topic or only tangentially related to what was asked, gently
-    acknowledge what they said, clarify what you were asking, and re-ask the same question.
-    Only move to the next question when the current one has a real, specific answer.
+    CRITICAL RULE — STAY ON THE CURRENT TOPIC:
+    The field `last_question_asked` tells you what you asked the candidate last turn.
+    Before moving to a new topic, verify that the candidate's answer actually addresses
+    that question. If the answer is off-topic or only tangentially related, acknowledge
+    what they said, clarify what you were asking, and re-ask the same question.
+    Only advance when the current topic has a real, specific answer.
+
+    QUESTION GENERATION:
+    - Look at `profile_gaps_json` — the ordered list of profile attributes still missing
+      or insufficient. Pick the most important gap to address next.
+    - Use `attribute_schema_json` to understand what good content looks like for that
+      attribute, then craft a natural, conversational question that would draw out that
+      information from this specific candidate.
+    - The question must NOT be scripted or generic. Reference what the candidate has
+      already shared. Make it feel like a real coaching conversation.
+    - Ask exactly ONE question per turn.
+
+    PROGRESS COMMUNICATION:
+    - `completeness_score` is an integer 0–100 reflecting how complete the profile is.
+    - Naturally weave a brief progress indicator into your response each turn — but keep
+      it encouraging and conversational, not robotic. Examples:
+        "We're about 40% of the way through — you're making solid progress."
+        "You're at 75% — just a couple of areas left to cover."
+        "Almost there — the profile is 90% complete."
+    - Place the progress note at the END of your acknowledgement, before the next question.
+    - Keep it to one short sentence. Never repeat it mid-response.
 
     OTHER RULES:
     - Briefly acknowledge the candidate's answer before asking the next question.
-    - Ask exactly ONE question per turn.
-    - Skip areas already captured in current_profile_json.
+    - Skip attributes already captured in current_profile_json.
     - If answer_classification is 'candidate_question', answer the candidate's question
       clearly and concisely first, then re-ask last_question_asked.
     - If has_files is 'false', append this reminder at the very end (new line):
       "(Tip: uploading your resume, transcripts, or any background notes will let me
       give you much more tailored guidance.)"
     - Extract concrete profile information from the candidate's answer into
-      profile_updates_json. Use keys: career_path, undergrad_degree, role_transitions,
-      post_mba_goals, motivation_timing, why_not_current_path, evidence_for_goals,
-      identified_weaknesses. Return {{}} if the answer was vague or off-topic.
+      profile_updates_json. Use the attribute keys from attribute_schema_json.
+      Return {} if the answer was vague or off-topic.
     """
 
     candidate_name: str = dspy.InputField(desc="The candidate's full name.")
@@ -62,6 +80,15 @@ class OpenAIIntakeInterviewSignature(dspy.Signature):
     current_profile_json: str = dspy.InputField(
         desc="JSON object of profile attributes already captured. Keys present mean that area is covered."
     )
+    profile_gaps_json: str = dspy.InputField(
+        desc="JSON array of candidate-input attribute keys that are still missing or insufficient, in priority order."
+    )
+    attribute_schema_json: str = dspy.InputField(
+        desc="JSON object mapping attribute keys to descriptions of what good content looks like."
+    )
+    completeness_score: str = dspy.InputField(
+        desc="Integer 0–100 indicating how complete the profile is. Use this to inform the candidate of their progress."
+    )
     conversation_history: str = dspy.InputField(
         desc="Recent conversation as alternating INTERVIEWER / CANDIDATE lines."
     )
@@ -70,16 +97,20 @@ class OpenAIIntakeInterviewSignature(dspy.Signature):
     answer_classification: str = dspy.InputField(
         desc="One of: relevant, candidate_question. 'relevant' means the message attempted to answer the question."
     )
+
     response: str = dspy.OutputField(
         desc=(
-            "Your reply. If the answer addressed last_question_asked: acknowledge + ask next question. "
-            "If the answer did NOT address last_question_asked: acknowledge what they said, clarify "
-            "what you were asking, and re-ask the same question. "
-            "If candidate_question: answer their question first, then re-ask last_question_asked."
+            "Your reply. Acknowledge the candidate's answer, then ask a targeted question "
+            "about the highest-priority gap from profile_gaps_json. If the answer did NOT "
+            "address last_question_asked, redirect and re-ask the same question instead of "
+            "moving on. If candidate_question: answer first, then re-ask last_question_asked."
         )
     )
     profile_updates_json: str = dspy.OutputField(
-        desc="Valid JSON object of new profile key/value pairs extracted from the candidate's answer. Empty object {} if answer was vague or off-topic."
+        desc=(
+            "Valid JSON object of new profile key/value pairs extracted from the candidate's "
+            "answer. Keys must match attribute_schema_json. Return {} if answer was vague or off-topic."
+        )
     )
 
 
@@ -93,6 +124,9 @@ class OpenAIIntakeInterviewer(dspy.Module):
         candidate_name: str,
         last_question_asked: str,
         current_profile_json: str,
+        profile_gaps_json: str,
+        attribute_schema_json: str,
+        completeness_score: int,
         conversation_history: str,
         user_message: str,
         has_files: bool,
@@ -102,6 +136,9 @@ class OpenAIIntakeInterviewer(dspy.Module):
             candidate_name=candidate_name,
             last_question_asked=last_question_asked,
             current_profile_json=current_profile_json,
+            profile_gaps_json=profile_gaps_json,
+            attribute_schema_json=attribute_schema_json,
+            completeness_score=str(completeness_score),
             conversation_history=conversation_history,
             user_message=user_message,
             has_files="true" if has_files else "false",
@@ -113,9 +150,9 @@ class MockIntakeInterviewer(dspy.Module):
     """
     Deterministic interviewer for mock/test mode.
 
-    - Attempts to extract profile updates from the user message.
-    - If the current question's key was NOT populated by the answer, stays on that
-      question and asks it again (handles off-topic / vague answers).
+    - Reads profile_gaps_json to find the first uncovered attribute.
+    - Asks a generic "tell me about X" question for that attribute.
+    - Attempts simple keyword extraction for profile updates.
     - When answer_classification is 'candidate_question', re-asks last_question_asked.
     - Appends the no-files nudge when has_files=False.
     """
@@ -125,6 +162,9 @@ class MockIntakeInterviewer(dspy.Module):
         candidate_name: str,
         last_question_asked: str,
         current_profile_json: str,
+        profile_gaps_json: str,
+        attribute_schema_json: str,
+        completeness_score: int,
         conversation_history: str,
         user_message: str,
         has_files: bool,
@@ -135,50 +175,62 @@ class MockIntakeInterviewer(dspy.Module):
         except (json.JSONDecodeError, ValueError):
             profile = {}
 
-        # Determine which question is currently pending (first key absent from profile).
-        current_key: str | None = None
-        current_question: str | None = None
-        for key, question in INTERVIEW_QUESTIONS:
-            if key not in profile:
-                current_key = key
-                current_question = question
-                break
+        try:
+            gaps: list[str] = json.loads(profile_gaps_json) if profile_gaps_json else []
+            if not isinstance(gaps, list):
+                gaps = []
+        except (json.JSONDecodeError, ValueError):
+            gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if k not in profile]
 
-        all_done_question = (
+        current_gap = gaps[0] if gaps else None
+
+        all_done_message = (
             "You've covered a lot of ground — thank you. "
             "Is there anything else about your background or goals you'd like to add before we move on?"
         )
 
-        # Build the response
+        progress_note = _build_progress_note(completeness_score)
+
         if answer_classification == "candidate_question":
+            if last_question_asked:
+                reask = last_question_asked
+            elif current_gap:
+                reask = _MOCK_QUESTION_HINTS.get(
+                    current_gap,
+                    f"can you tell me about your {current_gap.replace('_', ' ')}?",
+                )
+            else:
+                reask = all_done_message
             response = (
                 "That's a great question. The MBA admissions process typically takes 6–12 months "
                 "from preparation to decision, and strong applications combine a clear narrative, "
                 "compelling recommendations, and a polished set of essays.\n\n"
-                f"Now, back to where we were — {last_question_asked or current_question or all_done_question}"
+                f"Now, back to where we were — {reask}"
             )
             profile_updates: dict = {}
         else:
-            # Try to extract profile data from the answer.
             profile_updates = _extract_profile_updates(user_message, profile)
 
-            # If the current question's key was not populated, the answer didn't
-            # address it — re-ask with a gentle redirect.
-            if current_key and current_key not in profile_updates:
-                response = (
-                    f"Thanks for sharing that — it's useful context. "
-                    f"I want to make sure I understand: {current_question}"
+            if current_gap and current_gap not in profile_updates:
+                hint = _MOCK_QUESTION_HINTS.get(
+                    current_gap,
+                    f"can you tell me more about your {current_gap.replace('_', ' ')}?",
                 )
+                response = f"Thanks for sharing that. {progress_note}\n\n{hint}"
             else:
-                # Answer populated the key — advance to the next question.
                 merged_profile = {**profile, **profile_updates}
-                next_question: str | None = None
-                for key, question in INTERVIEW_QUESTIONS:
-                    if key not in merged_profile:
-                        next_question = question
-                        break
+                remaining_gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if k not in merged_profile]
+                next_gap = remaining_gaps[0] if remaining_gaps else None
+
                 ack = _build_acknowledgement(user_message)
-                response = f"{ack}\n\n{next_question or all_done_question}"
+                if next_gap:
+                    next_q = _MOCK_QUESTION_HINTS.get(
+                        next_gap,
+                        f"can you walk me through your {next_gap.replace('_', ' ')}?",
+                    )
+                    response = f"{ack} {progress_note}\n\n{next_q}"
+                else:
+                    response = f"{ack}\n\n{all_done_message}"
 
         if not has_files:
             response += _NO_FILES_NUDGE
@@ -189,18 +241,21 @@ class MockIntakeInterviewer(dspy.Module):
         )
 
 
-def _extract_last_interviewer_question(conversation_history: str) -> str:
-    """Pull the most recent INTERVIEWER line from the history string."""
-    lines = conversation_history.strip().splitlines()
-    for line in reversed(lines):
-        if line.upper().startswith("INTERVIEWER:") or line.upper().startswith("ASSISTANT:"):
-            text = line.split(":", 1)[-1].strip()
-            # Return only the last sentence if it ends with '?'
-            sentences = text.split("?")
-            if len(sentences) > 1:
-                return sentences[-2].strip().split("\n")[-1].strip() + "?"
-            return text
-    return ""
+def _build_progress_note(score: int) -> str:
+    """Return a short, encouraging progress sentence based on the completeness score."""
+    if score <= 0:
+        return "We're just getting started."
+    if score < 25:
+        return f"We're about {score}% of the way through — good start."
+    if score < 50:
+        return f"You're at {score}% — we're making solid progress."
+    if score < 75:
+        return f"You're at {score}% — more than halfway there."
+    if score < 90:
+        return f"Great progress — the profile is {score}% complete."
+    if score < 100:
+        return f"Almost there — {score}% complete, just a couple of areas left."
+    return "The profile is complete."
 
 
 def _build_acknowledgement(user_message: str) -> str:
@@ -214,50 +269,55 @@ def _build_acknowledgement(user_message: str) -> str:
 
 def _extract_profile_updates(user_message: str, existing_profile: dict) -> dict:
     """
-    Very lightweight keyword heuristics to populate profile keys from the message.
+    Lightweight keyword heuristics to populate profile keys from the message.
     Only extracts keys not already present so we don't overwrite richer data.
     """
     updates: dict = {}
     msg_lower = user_message.lower()
 
-    if "career_path" not in existing_profile and any(
-        kw in msg_lower for kw in ("started", "began", "career", "worked at", "joined", "role")
+    if "core_identity" not in existing_profile and any(
+        kw in msg_lower for kw in ("i am", "i've been", "i work", "my role", "i lead")
     ):
-        updates["career_path"] = user_message.strip()
+        updates["core_identity"] = user_message.strip()
 
-    if "undergrad_degree" not in existing_profile and any(
-        kw in msg_lower for kw in ("degree", "major", "studied", "undergrad", "bachelor", "university", "college")
+    if "domain_base" not in existing_profile and any(
+        kw in msg_lower for kw in ("sector", "industry", "government", "military", "finance", "tech", "startup")
     ):
-        updates["undergrad_degree"] = user_message.strip()
+        updates["domain_base"] = user_message.strip()
 
-    if "role_transitions" not in existing_profile and any(
-        kw in msg_lower for kw in ("moved", "switched", "transition", "left", "changed", "promoted")
+    if "core_strengths" not in existing_profile and any(
+        kw in msg_lower for kw in ("strength", "good at", "excel", "known for", "skilled", "expertise")
     ):
-        updates["role_transitions"] = user_message.strip()
+        updates["core_strengths"] = user_message.strip()
 
-    if "post_mba_goals" not in existing_profile and any(
-        kw in msg_lower for kw in ("want to", "goal", "after the program", "hope to", "plan to", "aim to")
+    if "differentiation_layer" not in existing_profile and any(
+        kw in msg_lower for kw in ("resilience", "community", "adversity", "values", "identity", "personal")
     ):
-        updates["post_mba_goals"] = user_message.strip()
+        updates["differentiation_layer"] = user_message.strip()
 
-    if "motivation_timing" not in existing_profile and any(
-        kw in msg_lower for kw in ("now", "timing", "right time", "this year", "ready", "opportunity")
+    if "intellectual_working_style" not in existing_profile and any(
+        kw in msg_lower for kw in ("analytical", "systematic", "think", "approach", "problem", "data")
     ):
-        updates["motivation_timing"] = user_message.strip()
+        updates["intellectual_working_style"] = user_message.strip()
 
-    if "why_not_current_path" not in existing_profile and any(
-        kw in msg_lower for kw in ("can't", "cannot", "without", "ceiling", "limited", "stuck", "plateau")
+    if "motivation" not in existing_profile and any(
+        kw in msg_lower for kw in ("want to", "goal", "after the", "hope to", "plan to", "aim to", "mba because")
     ):
-        updates["why_not_current_path"] = user_message.strip()
+        updates["motivation"] = user_message.strip()
 
-    if "evidence_for_goals" not in existing_profile and any(
-        kw in msg_lower for kw in ("led", "built", "launched", "achieved", "result", "impact", "evidence", "proof")
+    if "core_tension" not in existing_profile and any(
+        kw in msg_lower for kw in ("pivot", "transition", "switch", "change", "move into", "leave")
     ):
-        updates["evidence_for_goals"] = user_message.strip()
+        updates["core_tension"] = user_message.strip()
 
-    if "identified_weaknesses" not in existing_profile and any(
-        kw in msg_lower for kw in ("weak", "gap", "missing", "lack", "haven't", "low gpa", "low gmat", "no experience")
+    if "transferable_assets" not in existing_profile and any(
+        kw in msg_lower for kw in ("transferable", "bring", "apply", "leverage", "experience in", "background in")
     ):
-        updates["identified_weaknesses"] = user_message.strip()
+        updates["transferable_assets"] = user_message.strip()
+
+    if "risks" not in existing_profile and any(
+        kw in msg_lower for kw in ("weak", "gap", "missing", "lack", "haven't", "low gpa", "low gmat", "concern")
+    ):
+        updates["risks"] = user_message.strip()
 
     return updates

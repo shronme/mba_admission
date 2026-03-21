@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
 from app.db.models.candidate import Candidate
 from app.db.models.candidate_sessions import CandidateSession
@@ -38,6 +39,7 @@ def _candidate_to_out(c: Candidate) -> CandidateOut:
         full_name=c.full_name,
         program_type=c.program_type.value,
         status=c.status.value,
+        stage=c.stage.value,
         profile=profile_out,
     )
 
@@ -119,3 +121,23 @@ async def enter_with_email(
         candidate=_candidate_to_out(candidate),
         session_token=str(token),
     )
+
+
+@router.get("/me", response_model=CandidateOut)
+async def get_me(
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> CandidateOut:
+    """Return the authenticated candidate with their current profile (for polling)."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    result = await session.execute(
+        select(Candidate)
+        .options(selectinload(Candidate.profile))
+        .where(Candidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    return _candidate_to_out(candidate)

@@ -433,12 +433,18 @@ def process_uploaded_document(self, file_id: str) -> dict:
                     "extracted_chunks": chunks,
                 }
 
-        # --- 7. Post chat notification ---
+        # --- 7. Post chat notification (fires immediately so the candidate gets fast feedback) ---
         _post_chat_notification(
             candidate_id=candidate_id,
             filename=original_filename,
             doc_type=doc_type,
         )
+
+        # --- 8. Chain async profile update task (runs independently after this task completes) ---
+        from app.workers.tasks.profile_update import update_profile_from_document
+
+        update_profile_from_document.delay(file_id)
+        logger.info("doc_processing profile_update_enqueued file_id=%s", file_id)
 
         logger.info("doc_processing done file_id=%s doc_type=%s", file_id, doc_type)
         return {"status": "ok", "file_id": file_id, "document_type": doc_type.value}

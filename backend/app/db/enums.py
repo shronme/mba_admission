@@ -9,6 +9,18 @@ class CandidateStatus(StrEnum):
     PROSPECT = "prospect"
 
 
+class CandidateStage(StrEnum):
+    INTAKE = "intake"
+    DIAGNOSIS = "diagnosis"
+    PROGRAM_RESEARCH = "program_research"
+    STRATEGY = "strategy"
+    NARRATIVE = "narrative"
+    SCHOOL_LIST = "school_list"
+    APPLICATION_WORK = "application_work"
+    ITERATION = "iteration"
+    INTERVIEW_PREPARATION = "interview_preparation"
+
+
 class ProgramType(StrEnum):
     UNDERGRAD = "undergrad"
     GRAD = "grad"

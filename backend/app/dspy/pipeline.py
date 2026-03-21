@@ -10,13 +10,13 @@ from app.dspy.answer_relevance_classifier import (
     OpenAIAnswerRelevanceClassifier,
 )
 from app.dspy.intake_interviewer import MockIntakeInterviewer, OpenAIIntakeInterviewer
-from app.dspy.response_generator import AdmissionsResponseGenerator
-from app.dspy.openai_response_generator import OpenAIResponseGenerator
-from app.schemas.intent_routing import (
-    IntentRoutingOutput,
-    PrimaryIntent,
-    SecondaryFlag,
+from app.dspy.profile_agent import (
+    CANDIDATE_INPUT_ATTRIBUTES,
+    _ATTRIBUTE_SCHEMA_JSON,
+    get_profile_gaps,
+    run_profile_agent,
 )
+from app.dspy.research_agent import MockResearchAgent, OpenAIResearchAgent
 
 _DISALLOWED_FULL_ESSAY_PHRASES = (
     "write my personal statement",
@@ -27,28 +27,6 @@ _DISALLOWED_FULL_ESSAY_PHRASES = (
 )
 
 _OFF_TOPIC_KEYWORDS = ("calculus", "photosynthesis", "quantum", "chemistry")
-
-
-def _build_memory_context(
-    *,
-    candidate_name: str | None,
-    candidate_attributes: dict[str, Any] | None,
-    docs_snippets: list[str],
-    recent_messages: list[dict[str, Any]],
-) -> str:
-    attrs = candidate_attributes or {}
-    docs_joined = "\n\n".join(snippet[:2000] for snippet in docs_snippets if snippet)[:8000]
-    history = "\n".join(
-        f"{m.get('role', '?').upper()}: {m.get('content', '')}"[:500] for m in recent_messages
-    )[:4000]
-
-    return (
-        "Candidate profile:\n"
-        f"- name: {candidate_name or 'unknown'}\n"
-        f"- attributes: {json.dumps(attrs, ensure_ascii=False)[:2000]}\n\n"
-        f"Documents extracted snippets:\n{docs_joined or '(none)'}\n\n"
-        f"Recent conversation:\n{history or '(none)'}\n"
-    )
 
 
 def _build_conversation_history(recent_messages: list[dict[str, Any]]) -> str:
@@ -78,12 +56,19 @@ def generate_assistant_response(
     candidate_profile: dict[str, Any] | None,
     docs_snippets: list[str],
     recent_messages: list[dict[str, Any]],
-) -> tuple[str, dict[str, Any]]:
+    profile_complete: bool = False,
+) -> tuple[str, dict[str, Any], bool, int]:
     """
-    DSPy pipeline: Intent Classification → Answer Relevance → Intake Interview.
+    DSPy pipeline: route based on profile completeness, then generate a response.
 
-    Returns a tuple of (response_text, profile_updates).
-    profile_updates is a dict of new key/value pairs to merge into CandidateProfile.attributes.
+    Returns a 4-tuple of:
+      - response_text: str
+      - profile_updates: dict  — new key/value pairs to merge into CandidateProfile.attributes
+      - is_complete: bool      — whether the profile is complete after merging updates
+      - completeness_score: int — 0-100 quality-aware score from ProfileAgent (stable, to be persisted)
+
+    When profile_complete=True the ResearchAgent handles the response.
+    When profile_complete=False the IntakeInterviewer conducts a gap-driven question.
     """
 
     use_openai = (
@@ -93,52 +78,56 @@ def generate_assistant_response(
 
     user_lower = (user_message or "").lower()
 
-    # --- Guardrails (unchanged) ---
-    disallowed_full_essay = any(phrase in user_lower for phrase in _DISALLOWED_FULL_ESSAY_PHRASES)
-    off_topic = any(kw in user_lower for kw in _OFF_TOPIC_KEYWORDS)
-
-    if disallowed_full_essay:
+    # --- Guardrails ---
+    if any(phrase in user_lower for phrase in _DISALLOWED_FULL_ESSAY_PHRASES):
         return (
             "I can help you brainstorm, outline, and improve your draft, but I can't write a full essay for you. "
             "Paste the prompt and share a few bullet points from your own story, and I'll help shape a strong outline.",
             {},
+            profile_complete,
+            -1,  # sentinel: no score update on guardrail short-circuit
         )
 
-    if off_topic:
+    if any(kw in user_lower for kw in _OFF_TOPIC_KEYWORDS):
         return (
             "I can only help with graduate admissions (documents, goals, school strategy, and essay planning). "
-            "Tell me what program/cycle you're targeting and what documents you have.",
+            "Tell me what programme/cycle you're targeting and what documents you have.",
             {},
+            profile_complete,
+            -1,
         )
 
-    # --- Routing ---
-    secondary_flags: list[SecondaryFlag] = []
-    has_files = file_count > 0
-    if not has_files:
-        secondary_flags.append(SecondaryFlag.NO_FILES)
-
-    routing = IntentRoutingOutput(
-        primary_intent=PrimaryIntent.INTAKE_INTERVIEW,
-        secondary_flags=secondary_flags,
-        confidence=0.95,
-        reasoning="Always route to intake interview.",
-        recommended_agent="intake_interview_agent",
-        requires_clarification=False,
-    )
-
-    # --- Context ---
     candidate_name = candidate_profile.get("full_name") if candidate_profile else None
     candidate_attributes: dict[str, Any] = (
         (candidate_profile.get("attributes") or {}) if candidate_profile else {}
     )
-    current_profile_json = json.dumps(candidate_attributes, ensure_ascii=False)
+
+    # --- Route to ResearchAgent when the profile is already complete ---
+    if profile_complete:
+        research_agent = OpenAIResearchAgent() if use_openai else MockResearchAgent()
+        research_out = run_dspy_module(
+            research_agent,
+            candidate_name=candidate_name or "Candidate",
+            profile_attributes_json=json.dumps(candidate_attributes, ensure_ascii=False),
+        )
+        return str(getattr(research_out, "response", "")), {}, True, 100
+
+    # --- Intake Interview flow ---
+    has_files = file_count > 0
     conversation_history = _build_conversation_history(recent_messages)
+    last_question = _last_assistant_message(recent_messages)
+    current_profile_json = json.dumps(candidate_attributes, ensure_ascii=False)
+
+    # Run ProfileAgent on the current profile to get quality-aware gaps and the real
+    # score. This is what the candidate sees as their progress indicator, so it must
+    # reflect content quality — not just whether a key is present.
+    _, current_gaps, _, current_score = run_profile_agent(
+        candidate_attributes, use_openai=use_openai
+    )
+    profile_gaps_json = json.dumps(current_gaps, ensure_ascii=False)
 
     # --- Answer Relevance Classification ---
-    # Skip on the very first turn (no prior assistant message exists yet).
-    last_question = _last_assistant_message(recent_messages)
     answer_classification = "relevant"
-
     if last_question:
         relevance_classifier = (
             OpenAIAnswerRelevanceClassifier() if use_openai else MockAnswerRelevanceClassifier()
@@ -151,7 +140,6 @@ def generate_assistant_response(
         answer_classification = str(getattr(rel_pred, "classification", "relevant"))
 
         if answer_classification == "irrelevant":
-            # Short-circuit: alert and re-ask the same question
             alert = (
                 f"It looks like that didn't quite address what I asked. Let me re-ask:\n\n"
                 f"{last_question}"
@@ -159,15 +147,18 @@ def generate_assistant_response(
             if not has_files:
                 from app.dspy.intake_interviewer import _NO_FILES_NUDGE
                 alert += _NO_FILES_NUDGE
-            return alert, {}
+            return alert, {}, False, -1  # score unchanged — no re-evaluation needed
 
-    # --- Intake Interview Response Generation ---
+    # --- Generate intake response ---
     interviewer = OpenAIIntakeInterviewer() if use_openai else MockIntakeInterviewer()
     out = run_dspy_module(
         interviewer,
         candidate_name=candidate_name or "Candidate",
         last_question_asked=last_question,
         current_profile_json=current_profile_json,
+        profile_gaps_json=profile_gaps_json,
+        attribute_schema_json=_ATTRIBUTE_SCHEMA_JSON,
+        completeness_score=current_score,
         conversation_history=conversation_history,
         user_message=user_message,
         has_files=has_files,
@@ -176,7 +167,7 @@ def generate_assistant_response(
 
     response_text = str(getattr(out, "response", ""))
 
-    # Parse profile updates — skip extraction when candidate was asking a question
+    # Parse profile updates (skip when candidate was asking a question)
     profile_updates: dict[str, Any] = {}
     if answer_classification != "candidate_question":
         raw_updates = str(getattr(out, "profile_updates_json", "") or "")
@@ -187,7 +178,15 @@ def generate_assistant_response(
         except (json.JSONDecodeError, ValueError):
             pass
 
-    return response_text, profile_updates
+    # Determine completeness on the merged profile so the caller can persist the flag.
+    merged_attributes = {**candidate_attributes, **profile_updates}
+    is_complete, _, synthesized, post_update_score = run_profile_agent(merged_attributes, use_openai=use_openai)
+
+    # Merge synthesized derived attributes into the updates so they get persisted.
+    if synthesized:
+        profile_updates = {**profile_updates, **synthesized}
+
+    return response_text, profile_updates, is_complete, post_update_score
 
 
 def generate_initial_greeting(
@@ -195,50 +194,61 @@ def generate_initial_greeting(
     candidate_name: str | None = None,
     existing_attributes: dict[str, Any] | None = None,
     has_files: bool = False,
+    profile_complete: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """
     Generate the opening message when a new thread is created.
 
-    Reads existing profile attributes so returning candidates are not re-asked
-    questions they have already answered. Picks the first unanswered question
-    from the interview bank; if all are answered, invites the candidate to elaborate.
+    If the profile is already complete, returns the ResearchAgent handover message.
+    Otherwise returns a personalised greeting that picks up from the first uncovered gap.
     """
-    from app.dspy.intake_interviewer import INTERVIEW_QUESTIONS, _NO_FILES_NUDGE
+    from app.dspy.intake_interviewer import _NO_FILES_NUDGE
 
     attrs = existing_attributes or {}
     name_part = f" {candidate_name}" if candidate_name else ""
 
-    # Find the first question whose profile key is not yet populated.
-    next_question: str | None = None
-    for key, question in INTERVIEW_QUESTIONS:
-        if key not in attrs:
-            next_question = question
-            break
-
-    if next_question is None:
-        # All areas covered — invite elaboration.
-        next_question = (
-            "We've already covered a lot of ground together. "
-            "Is there anything you'd like to revisit, clarify, or add before we move on to strategy?"
+    if profile_complete:
+        use_openai = (
+            (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
+            and bool(os.getenv("OPENAI_API_KEY"))
         )
+        research_agent = OpenAIResearchAgent() if use_openai else MockResearchAgent()
+        out = run_dspy_module(
+            research_agent,
+            candidate_name=candidate_name or "Candidate",
+            profile_attributes_json=json.dumps(attrs, ensure_ascii=False),
+        )
+        return str(getattr(out, "response", "")), {}
 
-    # Tailor the preamble based on whether this is a fresh start or a return visit.
-    answered_count = sum(1 for key, _ in INTERVIEW_QUESTIONS if key in attrs)
+    gaps = get_profile_gaps(attrs)
+    first_gap = gaps[0] if gaps else None
+
+    answered_count = len(CANDIDATE_INPUT_ATTRIBUTES) - len(gaps)
+
     if answered_count == 0:
         preamble = (
             f"Hi{name_part}! I'm your MBA admissions coach. "
-            "I'll be asking you a series of questions to understand your background, goals, and motivations — "
+            "I'll ask you a series of questions to understand your background, goals, and motivations — "
             "this will help us build a strong, personalised application strategy together.\n\n"
         )
     else:
-        covered = ", ".join(
-            key.replace("_", " ")
-            for key, _ in INTERVIEW_QUESTIONS
-            if key in attrs
-        )
+        covered = ", ".join(k.replace("_", " ") for k in CANDIDATE_INPUT_ATTRIBUTES if k in attrs)
         preamble = (
             f"Welcome back{name_part}! We've already covered: {covered}. "
             "Let's pick up where we left off.\n\n"
+        )
+
+    if first_gap:
+        from app.dspy.profile_agent import PROFILE_ATTRIBUTE_SCHEMA
+        schema_desc = PROFILE_ATTRIBUTE_SCHEMA.get(first_gap, "").split(".")[0]
+        next_question = (
+            f"To get started, can you tell me about your "
+            f"{first_gap.replace('_', ' ')}? {schema_desc}."
+        )
+    else:
+        next_question = (
+            "We've already covered a lot of ground together. "
+            "Is there anything you'd like to revisit, clarify, or add before we move on to strategy?"
         )
 
     greeting = preamble + next_question

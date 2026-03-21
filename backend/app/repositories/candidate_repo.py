@@ -56,10 +56,17 @@ class CandidateRepository(BaseRepository):
         self,
         candidate_id: uuid.UUID,
         updates: dict,
+        *,
+        overwrite: bool = False,
     ) -> CandidateProfile:
         """
-        Shallow-merge `updates` into CandidateProfile.attributes without overwriting
-        existing keys. Creates the profile row if it does not yet exist.
+        Shallow-merge `updates` into CandidateProfile.attributes.
+
+        When `overwrite=False` (default, used for interview answers), existing keys
+        are preserved so richer prior data is not lost.
+        When `overwrite=True` (used for document extraction), incoming values replace
+        existing ones so documents can enrich or correct the profile.
+        Creates the profile row if it does not yet exist.
         """
         result = await self.session.execute(
             select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id),
@@ -70,9 +77,31 @@ class CandidateRepository(BaseRepository):
             self.session.add(profile)
 
         existing: dict = profile.attributes or {}
-        # Only add keys that are not already present (preserve richer existing data)
-        merged = {**updates, **existing}
-        profile.attributes = merged
+        if overwrite:
+            profile.attributes = {**existing, **updates}
+        else:
+            profile.attributes = {**updates, **existing}
+        await self.session.flush()
+        return profile
+
+    async def set_profile_complete(
+        self,
+        candidate_id: uuid.UUID,
+        complete: bool,
+        *,
+        score: int | None = None,
+    ) -> CandidateProfile:
+        """Set the profile_complete flag (and optionally the score), creating the profile row if needed."""
+        result = await self.session.execute(
+            select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id),
+        )
+        profile = result.scalar_one_or_none()
+        if profile is None:
+            profile = CandidateProfile(candidate_id=candidate_id, attributes={})
+            self.session.add(profile)
+        profile.profile_complete = complete
+        if score is not None:
+            profile.completeness_score = max(0, min(100, score))
         await self.session.flush()
         return profile
 
