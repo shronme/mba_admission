@@ -68,6 +68,7 @@ def generate_assistant_response(
     docs_snippets: list[str],
     recent_messages: list[dict[str, Any]],
     profile_complete: bool = False,
+    current_completeness_score: int = 0,
 ) -> tuple[str, dict[str, Any], bool, int]:
     """
     DSPy pipeline: route based on profile completeness, then generate a response.
@@ -141,7 +142,7 @@ def generate_assistant_response(
     # turn's full extraction. This is what the candidate sees as their progress
     # indicator, so it must reflect content quality — not just key presence.
     _, current_gaps, _, current_score = run_profile_agent(
-        projected_attributes, use_openai=use_openai
+        projected_attributes, use_openai=use_openai, min_score=current_completeness_score
     )
     profile_gaps_json = json.dumps(current_gaps, ensure_ascii=False)
 
@@ -189,7 +190,9 @@ def generate_assistant_response(
 
     # Determine completeness on the merged profile so the caller can persist the flag.
     merged_attributes = {**candidate_attributes, **profile_updates}
-    is_complete, _, synthesized, post_update_score = run_profile_agent(merged_attributes, use_openai=use_openai)
+    is_complete, _, synthesized, post_update_score = run_profile_agent(
+        merged_attributes, use_openai=use_openai, min_score=current_score
+    )
 
     # Merge synthesized derived attributes into the updates so they get persisted.
     if synthesized:

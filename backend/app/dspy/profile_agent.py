@@ -135,6 +135,10 @@ class ProfileCompletenessSignature(dspy.Signature):
         8  = good content but could be richer or more specific
         11 = excellent: specific, concrete, well-articulated
       Sum the scores across all 9 attributes. 100 = truly complete and polished.
+      IMPORTANT: The candidate's current score is provided in `current_completeness_score`.
+      Because profile data only grows (answers are never removed), your score MUST be
+      greater than or equal to `current_completeness_score`. Returning a lower score
+      would be logically inconsistent.
     - gaps_json: JSON array of candidate-input attribute keys that are missing or
       too thin. Empty array [] if complete.
     - synthesized_attributes_json: JSON object with values for all 5 synthesized
@@ -147,6 +151,12 @@ class ProfileCompletenessSignature(dspy.Signature):
     )
     attribute_schema_json: str = dspy.InputField(
         desc="JSON object mapping each attribute key to a description of what good content looks like."
+    )
+    current_completeness_score: str = dspy.InputField(
+        desc=(
+            "The candidate's current completeness score (0–100). Your returned score must be "
+            "greater than or equal to this value — profile data only grows, it never shrinks."
+        )
     )
 
     is_complete: str = dspy.OutputField(desc="'true' if the profile is complete, 'false' otherwise.")
@@ -174,10 +184,12 @@ class OpenAIProfileAgent(dspy.Module):
         self,
         profile_attributes_json: str,
         attribute_schema_json: str,
+        current_completeness_score: str = "0",
     ) -> dspy.Prediction:
         return self._predict(
             profile_attributes_json=profile_attributes_json,
             attribute_schema_json=attribute_schema_json,
+            current_completeness_score=current_completeness_score,
         )
 
 
@@ -199,6 +211,7 @@ class MockProfileAgent(dspy.Module):
         self,
         profile_attributes_json: str,
         attribute_schema_json: str,
+        current_completeness_score: str = "0",
     ) -> dspy.Prediction:
         try:
             attrs: dict = json.loads(profile_attributes_json) if profile_attributes_json else {}
@@ -214,6 +227,12 @@ class MockProfileAgent(dspy.Module):
         # Score: 11 points per filled attribute (9 attrs × 11 = 99, rounded to 100 when complete).
         filled_count = len(CANDIDATE_INPUT_ATTRIBUTES) - len(gaps)
         score = min(100, round(filled_count / len(CANDIDATE_INPUT_ATTRIBUTES) * 100))
+
+        try:
+            min_score = max(0, min(100, int(current_completeness_score)))
+        except (ValueError, TypeError):
+            min_score = 0
+        score = max(min_score, score)
 
         synthesized: dict[str, str] = {}
         if attrs.get("core_identity") or attrs.get("domain_base"):
@@ -247,32 +266,43 @@ def run_profile_agent(
     attributes: dict | None,
     *,
     use_openai: bool = False,
+    min_score: int = 0,
 ) -> tuple[bool, list[str], dict, int]:
     """
     Run the ProfileAgent and return (is_complete, gaps, synthesized_attrs, completeness_score).
 
     completeness_score is an integer 0–100 reflecting overall profile quality.
     Uses OpenAI when `use_openai=True` and OPENAI_API_KEY is set, otherwise mock.
+
+    min_score: the previously persisted score. The returned score is guaranteed to be
+    >= min_score because profile data only grows — it is never removed.
     """
     from app.core.dspy_runtime import run_dspy_module
+
+    min_score = max(0, min(100, min_score))
 
     # Strip internal reserved keys (e.g. _completeness_score) before sending to
     # the LLM so they don't pollute the completeness assessment.
     clean_attrs = {k: v for k, v in (attributes or {}).items() if not k.startswith("_")}
     attrs_json = json.dumps(clean_attrs, ensure_ascii=False)
     agent = OpenAIProfileAgent() if use_openai else MockProfileAgent()
-    pred = run_dspy_module(agent, profile_attributes_json=attrs_json, attribute_schema_json=_ATTRIBUTE_SCHEMA_JSON)
+    pred = run_dspy_module(
+        agent,
+        profile_attributes_json=attrs_json,
+        attribute_schema_json=_ATTRIBUTE_SCHEMA_JSON,
+        current_completeness_score=str(min_score),
+    )
 
     raw_complete = str(getattr(pred, "is_complete", "false")).strip().lower()
     is_complete = raw_complete == "true"
 
     try:
         score = int(str(getattr(pred, "completeness_score", "0")).strip())
-        score = max(0, min(100, score))
+        score = max(min_score, min(100, score))
     except (ValueError, TypeError):
         # Fallback: proportion of filled candidate-input attributes.
         filled = sum(1 for k in CANDIDATE_INPUT_ATTRIBUTES if (attributes or {}).get(k))
-        score = min(100, round(filled / len(CANDIDATE_INPUT_ATTRIBUTES) * 100))
+        score = max(min_score, min(100, round(filled / len(CANDIDATE_INPUT_ATTRIBUTES) * 100)))
 
     try:
         gaps: list[str] = json.loads(getattr(pred, "gaps_json", "[]") or "[]")

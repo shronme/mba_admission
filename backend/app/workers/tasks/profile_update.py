@@ -126,6 +126,7 @@ def update_profile_from_document(self, file_id: str) -> dict:
         profile_row = result.scalar_one_or_none()
         current_attributes: dict = profile_row.attributes or {} if profile_row else {}
         was_complete: bool = profile_row.profile_complete if profile_row else False
+        stored_score: int = int(profile_row.completeness_score) if profile_row else 0
 
     if was_complete:
         logger.info(
@@ -176,7 +177,7 @@ def update_profile_from_document(self, file_id: str) -> dict:
     from app.dspy.profile_agent import run_profile_agent
 
     is_complete, gaps, synthesized, score = run_profile_agent(
-        merged_attributes, use_openai=use_openai
+        merged_attributes, use_openai=use_openai, min_score=stored_score
     )
     logger.info(
         "profile_update profile_agent candidate_id=%s is_complete=%s gaps=%s",

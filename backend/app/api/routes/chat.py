@@ -242,6 +242,7 @@ async def stream_assistant_response(
     ).scalar_one()
     profile = (await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))).scalar_one_or_none()
     profile_complete: bool = bool(profile.profile_complete) if profile is not None else False
+    stored_completeness_score: int = int(profile.completeness_score) if profile is not None else 0
     candidate_profile: dict[str, Any] = {
         "full_name": candidate.user.full_name,
         "attributes": profile.attributes if profile is not None else None,
@@ -285,6 +286,7 @@ async def stream_assistant_response(
             docs_snippets=docs_snippets,
             recent_messages=recent_messages,
             profile_complete=profile_complete,
+            current_completeness_score=stored_completeness_score,
         )
 
     async def gen() -> AsyncGenerator[str, None]:
