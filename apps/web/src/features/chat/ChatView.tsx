@@ -195,33 +195,38 @@ export function ChatView({
 
   if (!base) {
     return (
-      <div className="flex h-full items-center justify-center rounded-lg border border-neutral-200 bg-white p-6 text-sm text-neutral-500">
-        Set <code className="rounded bg-neutral-100 px-1">NEXT_PUBLIC_API_URL</code>.
+      <div className="chat-empty-state">
+        Set <code className="code-inline">NEXT_PUBLIC_API_URL</code>.
       </div>
     );
   }
 
   const stageName = STAGES[Math.max(0, Math.min(currentStage - 1, STAGES.length - 1))].name;
 
+  const profileFillColor =
+    intakeComplete || intakeScore >= 75
+      ? "bg-gold-500"
+      : intakeScore >= 40
+        ? "bg-gold-400"
+        : "bg-cream-300";
+
   return (
-    <div className="flex h-full flex-col">
+    <div className="chat-panel">
       {/* Chat panel header */}
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+      <div className="chat-panel-header">
         <div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-neutral-900">
               Advising Session
             </span>
-            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-600">
-              {stageName}
-            </span>
+            <span className="chat-stage-badge">{stageName}</span>
           </div>
           <div className="mt-0.5 text-[11px] text-neutral-400">
             Upload documents on the right, then chat here about your goals.
           </div>
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="chat-status-dot" />
           <span className="text-[11px] text-neutral-400">
             {intakeComplete ? "Profile complete" : "Active"}
           </span>
@@ -229,29 +234,20 @@ export function ChatView({
       </div>
 
       {/* Profile completeness bar */}
-      <div className="border-b border-neutral-100 px-4 py-2">
+      <div className="chat-profile-bar">
         <div className="mb-1 flex items-center justify-between">
           <span className="text-[11px] text-neutral-400">
             {intakeComplete ? "Profile complete" : `Profile ${intakeScore}% complete`}
           </span>
           {intakeComplete && (
-            <span className="text-[11px] font-semibold text-emerald-600">
+            <span className="text-[11px] font-semibold text-gold-600">
               ✓ Ready for research
             </span>
           )}
         </div>
-        <div className="h-1 w-full overflow-hidden rounded-full bg-neutral-100">
+        <div className="chat-profile-track">
           <div
-            className={[
-              "h-full rounded-full transition-all duration-700",
-              intakeComplete
-                ? "bg-emerald-500"
-                : intakeScore >= 75
-                  ? "bg-indigo-500"
-                  : intakeScore >= 40
-                    ? "bg-indigo-400"
-                    : "bg-neutral-300",
-            ].join(" ")}
+            className={`chat-profile-fill ${profileFillColor}`}
             style={{ width: `${Math.min(100, Math.max(0, intakeScore))}%` }}
           />
         </div>
@@ -259,7 +255,7 @@ export function ChatView({
 
       <div
         ref={listRef}
-        className="flex-1 overflow-auto px-4 py-4"
+        className="chat-messages"
         aria-live="polite"
       >
         {messages.length === 0 ? (
@@ -275,13 +271,7 @@ export function ChatView({
                   key={m.id}
                   className={isUser ? "flex justify-end" : "flex justify-start"}
                 >
-                  <div
-                    className={
-                      isUser
-                        ? "max-w-[85%] rounded-2xl rounded-br-sm bg-neutral-900 px-4 py-3 text-sm text-white"
-                        : "max-w-[85%] rounded-2xl rounded-bl-sm bg-neutral-100 px-4 py-3 text-sm text-neutral-900"
-                    }
-                  >
+                  <div className={isUser ? "chat-msg-user" : "chat-msg-assistant"}>
                     {isUser ? (
                       m.content || " "
                     ) : m.content ? (
@@ -292,24 +282,24 @@ export function ChatView({
                             <p className="mb-2 last:mb-0">{children}</p>
                           ),
                           strong: ({ children }) => (
-                            <strong className="font-semibold">{children}</strong>
+                            <strong className="font-semibold text-gold-600">{children}</strong>
                           ),
                           em: ({ children }) => (
-                            <em className="italic text-neutral-600">{children}</em>
+                            <em className="italic text-neutral-500">{children}</em>
                           ),
                           ul: ({ children }) => (
-                            <ul className="mb-2 ml-4 list-disc space-y-1 last:mb-0">{children}</ul>
+                            <ul className="chat-prose-ul">{children}</ul>
                           ),
                           ol: ({ children }) => (
-                            <ol className="mb-2 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>
+                            <ol className="chat-prose-ol">{children}</ol>
                           ),
                           li: ({ children }) => (
                             <li className="leading-snug">{children}</li>
                           ),
                           code: ({ children }) => (
-                            <code className="rounded bg-neutral-200 px-1 py-0.5 text-xs">{children}</code>
+                            <code className="code-inline">{children}</code>
                           ),
-                          hr: () => <hr className="my-2 border-neutral-300" />,
+                          hr: () => <hr className="my-2 border-cream-200" />,
                         }}
                       >
                         {m.content}
@@ -331,14 +321,12 @@ export function ChatView({
       </div>
 
       {error && (
-        <div className="px-4 pb-3">
-          <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
-            {error}
-          </div>
+        <div className="bg-white px-4 pb-3">
+          <div className="error-banner">{error}</div>
         </div>
       )}
 
-      <div className="border-t border-neutral-200 px-4 pb-2 pt-3">
+      <div className="chat-input-area">
         <div className="flex items-end gap-3">
           <div className="flex-1">
             <label className="sr-only" htmlFor="chatInput">
@@ -354,8 +342,8 @@ export function ChatView({
                   void send();
                 }
               }}
-              placeholder="Tell me about yourself, your goals, or ask anything about the admissions process…"
-              className="min-h-[44px] w-full resize-none rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-neutral-500 focus:outline-none focus:ring-1 focus:ring-neutral-500"
+              placeholder="Type your answer…"
+              className="chat-textarea"
               disabled={busy}
             />
           </div>
@@ -363,17 +351,16 @@ export function ChatView({
             type="button"
             onClick={() => void send()}
             disabled={busy}
-            className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-neutral-800 disabled:opacity-50"
+            className="btn-primary"
           >
             Send
           </button>
         </div>
         <p className="mt-1.5 text-[10px] text-neutral-400">
-          Press <kbd className="rounded bg-neutral-100 px-1 font-mono">Enter</kbd> to send ·{" "}
-          <kbd className="rounded bg-neutral-100 px-1 font-mono">Shift+Enter</kbd> for new line
+          Press <kbd className="code-inline font-mono">Enter</kbd> to send ·{" "}
+          <kbd className="code-inline font-mono">Shift+Enter</kbd> for new line
         </p>
       </div>
     </div>
   );
 }
-

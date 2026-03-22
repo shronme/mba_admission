@@ -8,7 +8,25 @@ const config: Config = {
     "./src/features/**/*.{js,ts,jsx,tsx,mdx}",
   ],
   theme: {
-    extend: {},
+    extend: {
+      colors: {
+        cream: {
+          50: "#fdf8f0",
+          100: "#f5ecd8",
+          200: "#e8d8b8",
+          300: "#d9c296",
+        },
+        gold: {
+          50: "#fdf3d8",
+          100: "#f9e8b0",
+          200: "#f0d070",
+          400: "#d4a843",
+          500: "#c49a2c",
+          600: "#a07e23",
+          700: "#7d621b",
+        },
+      },
+    },
   },
   plugins: [],
 };

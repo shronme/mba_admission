@@ -206,9 +206,7 @@ export function SidebarDocuments({
       />
 
       {error && (
-        <div className="mx-4 mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900">
-          {error}
-        </div>
+        <div className="mx-4 mt-3 error-banner">{error}</div>
       )}
 
       {/* Stage sections */}
@@ -216,7 +214,20 @@ export function SidebarDocuments({
         {STAGE_NAMES.map((stageName, i) => {
           const stageNum = i + 1;
           const isCurrent = stageNum === currentStage;
+          const isPast = stageNum < currentStage;
           const isOpen = expanded.has(stageNum);
+
+          const stageNumClass = isCurrent
+            ? "sidebar-stage-num sidebar-stage-num-current"
+            : isPast
+              ? "sidebar-stage-num sidebar-stage-num-past"
+              : "sidebar-stage-num sidebar-stage-num-future";
+
+          const uploadAreaClass = [
+            "sidebar-upload-area",
+            dragging ? "sidebar-upload-dragging" : "sidebar-upload-idle",
+            busy ? "pointer-events-none opacity-50" : "",
+          ].join(" ");
 
           return (
             <div
@@ -230,23 +241,9 @@ export function SidebarDocuments({
                 className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-neutral-50"
               >
                 <div className="flex items-center gap-2">
+                  <span className={stageNumClass}>{stageNum}</span>
                   <span
-                    className={[
-                      "flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold",
-                      isCurrent
-                        ? "bg-indigo-600 text-white"
-                        : stageNum < currentStage
-                          ? "bg-indigo-100 text-indigo-600"
-                          : "bg-neutral-100 text-neutral-400",
-                    ].join(" ")}
-                  >
-                    {stageNum}
-                  </span>
-                  <span
-                    className={[
-                      "text-xs font-medium",
-                      isCurrent ? "text-neutral-900" : "text-neutral-500",
-                    ].join(" ")}
+                    className={`text-xs font-medium ${isCurrent ? "text-neutral-900" : "text-neutral-500"}`}
                   >
                     {stageName}
                   </span>
@@ -276,13 +273,7 @@ export function SidebarDocuments({
                         void doUpload(e.dataTransfer.files);
                       }}
                       onClick={() => fileInputRef.current?.click()}
-                      className={[
-                        "mb-3 cursor-pointer rounded-lg border-2 border-dashed px-3 py-4 text-center transition-colors",
-                        dragging
-                          ? "border-indigo-400 bg-indigo-50"
-                          : "border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50",
-                        busy ? "pointer-events-none opacity-50" : "",
-                      ].join(" ")}
+                      className={uploadAreaClass}
                     >
                       <UploadIcon />
                       <p className="mt-1.5 text-xs font-medium text-neutral-500">
@@ -302,10 +293,7 @@ export function SidebarDocuments({
                   ) : isCurrent ? (
                     <div className="space-y-2">
                       {files.map((f) => (
-                        <div
-                          key={f.id}
-                          className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white px-2.5 py-2"
-                        >
+                        <div key={f.id} className="sidebar-file-card">
                           <FileIcon />
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-[11px] font-medium text-neutral-800">
@@ -324,7 +312,7 @@ export function SidebarDocuments({
                             onClick={() =>
                               void download(f.id, f.original_filename)
                             }
-                            className="shrink-0 rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white hover:bg-neutral-700 disabled:opacity-40"
+                            className="btn-download"
                           >
                             ↓
                           </button>

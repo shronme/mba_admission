@@ -3,11 +3,189 @@
 @tailwind utilities;
 
 :root {
-  --foreground: #0a0a0a;
-  --background: #fafafa;
+  --foreground: #111111;
+  --background: #f5ecd8;
+  --gold: #c49a2c;
+  --cream: #f5ecd8;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
+}
+
+@layer components {
+  /* ── Shared ── */
+  .btn-ghost {
+    @apply rounded-md border border-neutral-300 px-3 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-cream-200;
+  }
+  .btn-primary {
+    @apply rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white shadow hover:bg-neutral-800 disabled:opacity-50;
+  }
+  .btn-download {
+    @apply shrink-0 rounded bg-neutral-900 px-2 py-1 text-[10px] font-medium text-white hover:bg-neutral-700 disabled:opacity-40;
+  }
+  .error-banner {
+    @apply rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-900;
+  }
+  .code-inline {
+    @apply rounded bg-cream-100 px-1 py-0.5 text-xs;
+  }
+
+  /* ── Dashboard layout ── */
+  .dashboard-root {
+    @apply flex h-screen flex-col overflow-hidden bg-cream-100;
+  }
+  .dashboard-header {
+    @apply shrink-0 border-b border-cream-200 bg-cream-100;
+  }
+  .dashboard-nav {
+    @apply flex items-center justify-between px-6 py-3;
+  }
+  .dashboard-content {
+    @apply flex flex-1 gap-4 overflow-hidden p-4;
+  }
+  .dashboard-chat-panel {
+    @apply flex flex-1 flex-col overflow-hidden rounded-xl border border-cream-200 bg-white shadow-sm;
+  }
+  .dashboard-sidebar {
+    @apply flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-cream-200 bg-white shadow-sm xl:w-80;
+  }
+
+  /* ── Stage progress bar ── */
+  .stage-bar {
+    @apply border-t border-cream-200 px-6 pb-4 pt-4;
+  }
+  .stage-name-badge {
+    @apply rounded-full border border-neutral-900 px-3 py-0.5 text-xs font-semibold text-neutral-900;
+  }
+  .stage-track {
+    @apply absolute left-3.5 right-3.5 top-3.5 h-px bg-cream-200;
+  }
+  .stage-progress-fill {
+    @apply absolute left-3.5 top-3.5 h-px bg-gold-500 transition-all duration-500;
+  }
+  .stage-step {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all;
+  }
+  .stage-step-completed {
+    @apply bg-gold-500 text-white;
+  }
+  .stage-step-current {
+    @apply bg-neutral-900 text-white ring-4 ring-neutral-900/20;
+  }
+  .stage-step-pending {
+    @apply bg-cream-200 text-neutral-700;
+  }
+  .stage-label {
+    @apply w-14 text-center text-[9px] leading-tight;
+  }
+  .stage-label-current {
+    @apply text-[13px] font-semibold text-neutral-900;
+  }
+  .stage-label-completed {
+    @apply text-neutral-700;
+  }
+  .stage-label-pending {
+    @apply text-[13px] text-neutral-600;
+  }
+  .stage-description {
+    @apply mt-2 text-[11px] text-neutral-700;
+  }
+
+  /* ── Intake progress bar ── */
+  .intake-bar-container {
+    @apply border-b border-neutral-100 px-4 py-2;
+  }
+  .intake-bar-track {
+    @apply h-1.5 w-full overflow-hidden rounded-full bg-neutral-100;
+  }
+  .intake-bar-fill {
+    @apply h-full rounded-full transition-all duration-700;
+  }
+  .intake-bar-complete {
+    @apply bg-emerald-500;
+  }
+  .intake-bar-high {
+    @apply bg-sky-500;
+  }
+  .intake-bar-mid {
+    @apply bg-sky-400;
+  }
+  .intake-bar-low {
+    @apply bg-neutral-300;
+  }
+
+  /* ── Chat panel ── */
+  .chat-panel {
+    @apply flex h-full flex-col;
+  }
+  .chat-panel-header {
+    @apply flex items-center justify-between border-b border-cream-100 bg-cream-50 px-4 py-3;
+  }
+  .chat-stage-badge {
+    @apply rounded-full border border-gold-500 bg-gold-50 px-2 py-0.5 text-[10px] font-semibold text-gold-600;
+  }
+  .chat-status-dot {
+    @apply h-2 w-2 rounded-full bg-gold-500;
+  }
+  .chat-profile-bar {
+    @apply border-b border-cream-100 bg-cream-50 px-4 py-2;
+  }
+  .chat-profile-track {
+    @apply h-1 w-full overflow-hidden rounded-full bg-cream-200;
+  }
+  .chat-profile-fill {
+    @apply h-full rounded-full transition-all duration-700;
+  }
+  .chat-messages {
+    @apply flex-1 overflow-auto bg-white px-4 py-4;
+  }
+  .chat-msg-user {
+    @apply max-w-[85%] rounded-2xl rounded-br-sm bg-neutral-900 px-4 py-3 text-sm text-white;
+  }
+  .chat-msg-assistant {
+    @apply max-w-[85%] rounded-2xl rounded-bl-sm border border-cream-100 bg-white px-4 py-3 text-sm text-neutral-800 shadow-sm;
+  }
+  .chat-input-area {
+    @apply border-t border-cream-100 bg-cream-50 px-4 pb-2 pt-3;
+  }
+  .chat-textarea {
+    @apply min-h-[44px] w-full resize-none rounded-md border border-cream-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-gold-400 focus:outline-none focus:ring-1 focus:ring-gold-400 placeholder:text-neutral-400;
+  }
+  .chat-empty-state {
+    @apply flex h-full items-center justify-center rounded-lg border border-cream-200 bg-cream-50 p-6 text-sm text-neutral-500;
+  }
+  .chat-prose-ul {
+    @apply mb-2 ml-4 list-disc space-y-1 last:mb-0;
+  }
+  .chat-prose-ol {
+    @apply mb-2 ml-4 list-decimal space-y-1 last:mb-0;
+  }
+
+  /* ── Sidebar documents ── */
+  .sidebar-stage-num {
+    @apply flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold;
+  }
+  .sidebar-stage-num-current {
+    @apply bg-indigo-600 text-white;
+  }
+  .sidebar-stage-num-past {
+    @apply bg-indigo-100 text-indigo-600;
+  }
+  .sidebar-stage-num-future {
+    @apply bg-neutral-100 text-neutral-400;
+  }
+  .sidebar-upload-area {
+    @apply mb-3 cursor-pointer rounded-lg border-2 border-dashed px-3 py-4 text-center transition-colors;
+  }
+  .sidebar-upload-idle {
+    @apply border-neutral-200 hover:border-neutral-300 hover:bg-neutral-50;
+  }
+  .sidebar-upload-dragging {
+    @apply border-indigo-400 bg-indigo-50;
+  }
+  .sidebar-file-card {
+    @apply flex items-start gap-2 rounded-md border border-neutral-200 bg-white px-2.5 py-2;
+  }
 }

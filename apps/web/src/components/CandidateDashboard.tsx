@@ -23,40 +23,34 @@ export function CandidateDashboard() {
   };
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
-      {/* ── Dark header ── */}
-      <header className="shrink-0 bg-slate-900">
-        {/* Top nav row */}
-        <div className="flex items-center justify-between px-6 py-3">
+    <div className="dashboard-root">
+      <header className="dashboard-header">
+        <div className="dashboard-nav">
           <div className="flex items-baseline gap-2">
-            <span className="text-sm font-bold tracking-tight text-white">
+            <span className="text-sm font-bold tracking-tight text-neutral-900">
               GradAdvisor
             </span>
-            <span className="hidden text-xs text-slate-400 sm:block">
-              US Graduate Admissions Consultant
+            <span className="hidden text-xs text-neutral-500 sm:block">
+              — AI Consultant
             </span>
           </div>
 
           <div className="flex items-center gap-2">
-
             <button
               type="button"
               onClick={signOut}
-              className="ml-2 rounded-md border border-slate-700 px-3 py-1 text-xs font-medium text-slate-300 transition-colors hover:bg-slate-800"
+              className="btn-ghost ml-2"
             >
               Sign out
             </button>
           </div>
         </div>
 
-        {/* Stage progress bar */}
         <StageProgressBar currentStage={currentStage} />
       </header>
 
-      {/* ── Main content ── */}
-      <div className="flex flex-1 gap-4 overflow-hidden p-4">
-        {/* Chat panel */}
-        <main className="flex flex-1 flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm">
+      <div className="dashboard-content">
+        <main className="dashboard-chat-panel">
           <ChatView
             sessionToken={sessionToken}
             currentStage={currentStage}
@@ -65,8 +59,7 @@ export function CandidateDashboard() {
           />
         </main>
 
-        {/* Documents sidebar */}
-        <aside className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm xl:w-80">
+        <aside className="dashboard-sidebar">
           <SidebarDocuments
             sessionToken={sessionToken}
             candidateEmail={candidate.email}
