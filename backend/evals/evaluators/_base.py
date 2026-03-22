@@ -35,7 +35,9 @@ def run_eval(
         display_progress=True,
         display_table=5,
     )
-    return evaluate(module)
+    result = evaluate(module)
+    # Newer DSPy versions return an EvaluationResult object; extract the float score.
+    return float(result.score) if hasattr(result, "score") else float(result)
 
 
 def compare_signatures(
@@ -144,25 +146,38 @@ def optimize(
         from dspy.teleprompt import MIPROv2  # type: ignore[import-not-found]
 
         auto = kwargs.pop("auto", "medium")
-        num_candidates = kwargs.pop("num_candidates", 10)
-        teleprompter = MIPROv2(
-            metric=metric,
-            auto=auto,
-            num_candidates=num_candidates,
-            **kwargs,
-        )
+        # num_candidates and num_trials cannot be set when auto is not None
+        # (MIPROv2 derives them from the auto preset instead).
+        num_candidates = kwargs.pop("num_candidates", None)
+        mipro_kwargs = dict(metric=metric, **kwargs)
+        if auto is None and num_candidates is not None:
+            mipro_kwargs["num_candidates"] = num_candidates
+        if auto is not None:
+            mipro_kwargs["auto"] = auto
+        teleprompter = MIPROv2(**mipro_kwargs)
         compiled = teleprompter.compile(
             module,
             trainset=trainset,
             valset=devset,
-            requires_permission_to_run=False,
         )
 
     if save_path is not None:
         path = Path(save_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        compiled.save(str(path))
-        logger.info("Compiled module saved to %s", path)
+        try:
+            compiled.save(str(path))
+            logger.info("Compiled module saved to %s", path)
+        except (RuntimeError, TypeError):
+            # JSON serialization can fail when bootstrapped demos contain
+            # non-serializable types (e.g. frozenset from expected_gaps).
+            # save_program=True requires a directory (no suffix).
+            prog_dir = path.with_suffix("")
+            prog_dir.mkdir(parents=True, exist_ok=True)
+            compiled.save(str(prog_dir), save_program=True)
+            logger.info(
+                "JSON serialization failed; compiled module saved as program directory to %s",
+                prog_dir,
+            )
 
     return compiled
 

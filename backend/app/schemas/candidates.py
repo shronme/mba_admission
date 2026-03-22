@@ -30,6 +30,8 @@ class CandidateProfileOut(BaseModel):
 
 
 class CandidateOut(BaseModel):
+    """Candidate view — email/full_name come from the joined User."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -42,7 +44,7 @@ class CandidateOut(BaseModel):
 
 
 class CandidateEnterResponse(BaseModel):
-    """Fake login: existing row vs newly created."""
+    """Login response for the legacy /candidates/enter endpoint."""
 
     created: bool
     candidate: CandidateOut

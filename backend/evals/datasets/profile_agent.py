@@ -82,6 +82,128 @@ _RICH_RISKS = (
     "address this in essays and potentially via a pre-MBA quant course."
 )
 
+# ── Cyber / national-security → climate pivot (all fields present, all thin) ──
+_CYBER_CLIMATE_CORE_IDENTITY = (
+    "Mission-driven operator working in high-stakes environments with early responsibility "
+    "and execution capability."
+)
+_CYBER_CLIMATE_DOMAIN_BASE = (
+    "Public sector / cyber / national-security leadership with PMO experience and "
+    "policy and operations exposure."
+)
+_CYBER_CLIMATE_CORE_STRENGTHS = (
+    "Leadership under pressure. Execution. Systems thinking. "
+    "Structured decision-making. High accountability."
+)
+_CYBER_CLIMATE_DIFFERENTIATION = (
+    "Personal resilience from health adversity. Values-driven mindset. "
+    "Community leadership (LGBTQ and youth). Strong communication. Moral courage."
+)
+_CYBER_CLIMATE_INTELLECTUAL = (
+    "Analytical (PPE and policy). Cross-domain thinker (tech and policy). "
+    "Evidence-driven. Structured problem-solver."
+)
+_CYBER_CLIMATE_MOTIVATION = (
+    "Maximize real-world impact at scale rather than career progression or prestige."
+)
+_CYBER_CLIMATE_TENSION = (
+    "Currently in national security but aiming to move into a global-impact domain (climate)."
+)
+_CYBER_CLIMATE_TRANSFERABLE = (
+    "Leading complex organizations. Operating under uncertainty. Managing risk. "
+    "Building scalable systems. Driving execution across stakeholders."
+)
+_CYBER_CLIMATE_RISKS = (
+    "Pivot credibility risk. Over-specialization in security. "
+    "Need for concrete climate goals. Avoid overstatement."
+)
+
+# ── finance operator → PE builder (all fields present, mixed richness) ──
+_DANIEL_CORE_IDENTITY = (
+    "Elite finance operator transitioning to investor and PE builder. "
+    "High-performing, structured, and analytical with proven execution in finance "
+    "and leadership, aiming for a top-tier finance career path."
+)
+_DANIEL_DOMAIN_BASE = (
+    "Transaction diligence, finance, and accounting with military leadership. "
+    "EY transaction diligence (M&A and PE deals), KPMG tax and M&A structuring, "
+    "and strong IDF leadership background."
+)
+_DANIEL_CORE_STRENGTHS = (
+    "Analytical rigor in finance and accounting. Transaction exposure in PE and M&A. "
+    "Structured thinking. Leadership at scale (90 soldiers, $15M budget). "
+    "High academic performance (top 5%). GMAT 750."
+)
+_DANIEL_DIFFERENTIATION = (
+    "Grew up under missile attacks due to proximity to Gaza. Holocaust family legacy. "
+    "Leadership under extreme pressure. Competitive athlete mindset from tennis."
+)
+_DANIEL_INTELLECTUAL = (
+    "Highly structured. Analytical and finance-driven. "
+    "Execution and optimization mindset. Problem-solver under pressure."
+)
+_DANIEL_MOTIVATION = (
+    "Build and scale businesses and drive economic impact in Israel. "
+    "Long-term goal: establish a private equity fund focused on traditional industries "
+    "and supporting minority employment and growth."
+)
+_DANIEL_TENSION = (
+    "Strong finance and leadership profile but needs global exposure and US positioning. "
+    "Main gap is access and positioning, not capability."
+)
+_DANIEL_TRANSFERABLE = (
+    "Deep transaction exposure from EY deals. M&A and tax structuring knowledge. "
+    "Leadership of large teams. Budget ownership ($15M). "
+    "Measurable impact including IRR improvement and cost savings."
+)
+_DANIEL_RISKS = (
+    "May appear too standard a finance profile. Risk of a generic IB-to-PE story. "
+    "Needs emotional and human depth. Requires strong US transition narrative."
+)
+
+# ── commercial operator → impact investor (all fields present, mixed richness) ──
+_SARA_CORE_IDENTITY = (
+    "Commercial operator transitioning to impact-driven builder. "
+    "Strong execution in sales and business development, understanding how businesses "
+    "grow, now seeking purpose-driven scale."
+)
+_SARA_DOMAIN_BASE = (
+    "Sales, business development, and startup ecosystem. Deloitte Catalyst "
+    "(startups, innovation, partnerships). Sales across B2B, B2C, and B2E. "
+    "Ecosystem exposure to VCs and accelerators."
+)
+_SARA_CORE_STRENGTHS = (
+    "Execution and sales performance. Business development. "
+    "Ecosystem building across partnerships and communities. "
+    "Startup exposure spanning 150+ companies. Hustle and self-learning."
+)
+_SARA_DIFFERENTIATION = (
+    "Female in male-dominated environments (Air Force and tech). "
+    "Multicultural background with language skills and global exposure. "
+    "Community and inclusion focus. Operates under pressure from military and conflict context."
+)
+_SARA_INTELLECTUAL = (
+    "Practical and hands-on. Learns by doing (Excel, finance, business models). "
+    "Commercial mindset. Pattern recognition from startup exposure."
+)
+_SARA_MOTIVATION = (
+    "Use technology and investment to drive global impact, specifically in emerging markets, "
+    "least developed countries, and inclusion via technology."
+)
+_SARA_TENSION = (
+    "Strong commercial and sales background but needs finance and investment credibility. "
+    "This is the core narrative gap."
+)
+_SARA_TRANSFERABLE = (
+    "Understanding of startup ecosystems. Deal flow exposure. Growth and scaling experience. "
+    "Partnership building. Market entry understanding."
+)
+_SARA_RISKS = (
+    "Perceived as a sales profile rather than a strategic one. "
+    "Weak formal finance background. GMAT weakness. "
+    "Generic impact story risk. Needs a strong bridge to investing."
+)
+
 
 def _ex(
     profile: dict,
@@ -251,6 +373,57 @@ EXAMPLES: list[dspy.Example] = [
         expected_is_complete="true",
         expected_gaps=frozenset(),
         expected_score_range=(80, 100),
+    ),
+    # ------------- cyber/national-security → climate pivot: all 9 fields, all thin
+    _ex(
+        {
+            "core_identity": _CYBER_CLIMATE_CORE_IDENTITY,
+            "domain_base": _CYBER_CLIMATE_DOMAIN_BASE,
+            "core_strengths": _CYBER_CLIMATE_CORE_STRENGTHS,
+            "differentiation_layer": _CYBER_CLIMATE_DIFFERENTIATION,
+            "intellectual_working_style": _CYBER_CLIMATE_INTELLECTUAL,
+            "motivation": _CYBER_CLIMATE_MOTIVATION,
+            "core_tension": _CYBER_CLIMATE_TENSION,
+            "transferable_assets": _CYBER_CLIMATE_TRANSFERABLE,
+            "risks": _CYBER_CLIMATE_RISKS,
+        },
+        expected_is_complete="false",
+        expected_gaps=frozenset(CANDIDATE_INPUT_ATTRIBUTES),
+        expected_score_range=(10, 40),
+    ),
+    # ----------- finance operator → PE builder: all 9, mixed richness
+    _ex(
+        {
+            "core_identity": _DANIEL_CORE_IDENTITY,
+            "domain_base": _DANIEL_DOMAIN_BASE,
+            "core_strengths": _DANIEL_CORE_STRENGTHS,
+            "differentiation_layer": _DANIEL_DIFFERENTIATION,
+            "intellectual_working_style": _DANIEL_INTELLECTUAL,
+            "motivation": _DANIEL_MOTIVATION,
+            "core_tension": _DANIEL_TENSION,
+            "transferable_assets": _DANIEL_TRANSFERABLE,
+            "risks": _DANIEL_RISKS,
+        },
+        expected_is_complete="false",
+        expected_gaps=frozenset({"core_identity", "intellectual_working_style", "core_tension"}),
+        expected_score_range=(35, 65),
+    ),
+    # ------------ commercial operator → impact investor: all 9, mixed richness
+    _ex(
+        {
+            "core_identity": _SARA_CORE_IDENTITY,
+            "domain_base": _SARA_DOMAIN_BASE,
+            "core_strengths": _SARA_CORE_STRENGTHS,
+            "differentiation_layer": _SARA_DIFFERENTIATION,
+            "intellectual_working_style": _SARA_INTELLECTUAL,
+            "motivation": _SARA_MOTIVATION,
+            "core_tension": _SARA_TENSION,
+            "transferable_assets": _SARA_TRANSFERABLE,
+            "risks": _SARA_RISKS,
+        },
+        expected_is_complete="false",
+        expected_gaps=frozenset({"core_identity", "intellectual_working_style"}),
+        expected_score_range=(30, 60),
     ),
 ]
 

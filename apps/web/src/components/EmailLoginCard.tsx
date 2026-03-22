@@ -3,10 +3,10 @@
 import { useState } from "react";
 
 import { useSession } from "@/context/SessionContext";
-import { enterWithEmail, getApiBaseUrl } from "@/lib/api";
+import { getApiBaseUrl } from "@/lib/api";
 
 export function EmailLoginCard() {
-  const { setSession } = useSession();
+  const { signIn } = useSession();
   const base = getApiBaseUrl();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -18,10 +18,7 @@ export function EmailLoginCard() {
     if (!base) return;
     setBusy(true);
     try {
-      const res = await enterWithEmail({
-        email,
-      });
-      setSession(res);
+      await signIn(email);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -42,8 +39,7 @@ export function EmailLoginCard() {
     <div className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold text-neutral-900">Continue with email</h2>
       <p className="mt-1 text-sm text-neutral-600">
-        No password — we look up your <strong>candidate</strong> record or create one. This is a
-        scaffold for real auth later.
+        Enter your email to access your dashboard.
       </p>
       <form onSubmit={(e) => void submit(e)} className="mt-4 space-y-4">
         <div>

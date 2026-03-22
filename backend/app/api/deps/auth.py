@@ -4,14 +4,38 @@ import logging
 import uuid
 
 from fastapi import Depends, Header, HTTPException
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_db_session
-from app.db.models.candidate import Candidate
-from app.db.models.candidate_sessions import CandidateSession
+from app.db.enums import UserRole
+from app.db.models.user import User
+from app.repositories.user_repo import UserRepository
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_bearer_token(authorization: str | None) -> uuid.UUID:
+    if not authorization or not authorization.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+    token_str = authorization.split(" ", 1)[1].strip()
+    try:
+        return uuid.UUID(token_str)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid session token") from None
+
+
+async def get_user_from_bearer_token(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    session: AsyncSession = Depends(get_db_session),
+) -> User:
+    """Resolve a UserSession token → User (with candidate + admin eagerly loaded)."""
+    token = _parse_bearer_token(authorization)
+    repo = UserRepository(session)
+    user = await repo.get_by_token(token)
+    if user is None:
+        logger.warning("auth_failed reason=unknown_session_token")
+        raise HTTPException(status_code=401, detail="Unknown session token")
+    return user
 
 
 async def get_candidate_id_from_bearer_token(
@@ -19,52 +43,36 @@ async def get_candidate_id_from_bearer_token(
     session: AsyncSession = Depends(get_db_session),
 ) -> uuid.UUID:
     """
-    Fake auth: `Authorization: Bearer <session_token>`.
-
-    Returns the associated `candidate_id`.
+    Candidate-scoped auth: token → User (role=candidate) → candidate_id.
+    Kept for backwards compatibility with all existing candidate routes.
     """
-
-    if not authorization or not authorization.lower().startswith("bearer "):
-        logger.warning("auth_failed reason=missing_or_malformed_authorization_header")
-        raise HTTPException(status_code=401, detail="Missing bearer token") from None
-
-    token_str = authorization.split(" ", 1)[1].strip()
-    try:
-        token = uuid.UUID(token_str)
-    except ValueError:
-        logger.warning("auth_failed reason=invalid_session_token_uuid")
-        raise HTTPException(status_code=401, detail="Invalid session token") from None
-
-    row = await session.execute(
-        select(CandidateSession).where(CandidateSession.token == token),
-    )
-    session_row = row.scalar_one_or_none()
-    if session_row is None:
+    token = _parse_bearer_token(authorization)
+    repo = UserRepository(session)
+    user = await repo.get_by_token(token)
+    if user is None:
         logger.warning("auth_failed reason=unknown_session_token")
-        raise HTTPException(status_code=401, detail="Unknown session token") from None
+        raise HTTPException(status_code=401, detail="Unknown session token")
+    if user.role != UserRole.CANDIDATE:
+        logger.warning("auth_failed reason=wrong_role role=%s", user.role)
+        raise HTTPException(status_code=403, detail="Candidate access required")
+    if user.candidate is None:
+        logger.warning("auth_failed reason=missing_candidate_row user_id=%s", user.id)
+        raise HTTPException(status_code=500, detail="Candidate record not found")
+    return user.candidate.id
 
-    return session_row.candidate_id
 
-
-async def get_candidate_by_bearer_token(
+async def get_admin_from_bearer_token(
     authorization: str | None = Header(default=None, alias="Authorization"),
     session: AsyncSession = Depends(get_db_session),
-) -> Candidate:
-    """
-    Fake auth: `Authorization: Bearer <session_token>`.
-
-    Returns the Candidate row associated with the token.
-    """
-
-    candidate_id = await get_candidate_id_from_bearer_token(
-        authorization=authorization, session=session
-    )
-    row = await session.execute(select(Candidate).where(Candidate.id == candidate_id))
-    candidate = row.scalar_one_or_none()
-    if candidate is None:
-        logger.warning(
-            "auth_failed reason=candidate_missing_for_session candidate_id=%s", candidate_id
-        )
-        raise HTTPException(status_code=404, detail="Candidate not found") from None
-    return candidate
-
+) -> User:
+    """Admin-scoped auth: token → User (role=admin)."""
+    token = _parse_bearer_token(authorization)
+    repo = UserRepository(session)
+    user = await repo.get_by_token(token)
+    if user is None:
+        logger.warning("admin_auth_failed reason=unknown_session_token")
+        raise HTTPException(status_code=401, detail="Unknown session token")
+    if user.role != UserRole.ADMIN:
+        logger.warning("admin_auth_failed reason=wrong_role role=%s", user.role)
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user

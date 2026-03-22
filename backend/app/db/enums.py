@@ -3,6 +3,11 @@ from __future__ import annotations
 from enum import StrEnum
 
 
+class UserRole(StrEnum):
+    CANDIDATE = "candidate"
+    ADMIN = "admin"
+
+
 class CandidateStatus(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"

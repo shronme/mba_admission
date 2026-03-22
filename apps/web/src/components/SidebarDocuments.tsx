@@ -65,10 +65,12 @@ export function SidebarDocuments({
   sessionToken,
   candidateEmail,
   currentStage = 1,
+  onFilesUploaded,
 }: {
   sessionToken?: string | null;
   candidateEmail: string | null | undefined;
   currentStage?: number;
+  onFilesUploaded?: () => void;
 }) {
   const [files, setFiles] = useState<UploadedFileDto[]>([]);
   const [busy, setBusy] = useState(false);
@@ -119,6 +121,7 @@ export function SidebarDocuments({
       const out = await listUploadedFiles(sessionToken ?? null);
       setFiles(out);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      onFilesUploaded?.();
     } catch (e) {
       setError(String(e));
     } finally {

@@ -11,10 +11,11 @@ import { StageProgressBar } from "@/components/StageProgressBar";
 export function CandidateDashboard() {
   const { session, signOut } = useSession();
   const [currentStage, setCurrentStage] = useState(1);
+  const [lastUploadedAt, setLastUploadedAt] = useState<number | undefined>();
 
-  if (!session) return null;
+  if (!session || session.role !== "candidate" || !session.candidate) return null;
 
-  const { candidate } = session;
+  const candidate = session.candidate;
   const sessionToken = session.session_token ?? null;
 
   const handleProfileUpdate = (intakeComplete: boolean) => {
@@ -60,6 +61,7 @@ export function CandidateDashboard() {
             sessionToken={sessionToken}
             currentStage={currentStage}
             onProfileUpdate={handleProfileUpdate}
+            lastUploadedAt={lastUploadedAt}
           />
         </main>
 
@@ -69,6 +71,7 @@ export function CandidateDashboard() {
             sessionToken={sessionToken}
             candidateEmail={candidate.email}
             currentStage={currentStage}
+            onFilesUploaded={() => setLastUploadedAt(Date.now())}
           />
         </aside>
       </div>

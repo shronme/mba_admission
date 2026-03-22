@@ -7,10 +7,15 @@ import { useSession } from "@/context/SessionContext";
 export function HomeGate({
   fallback,
   authenticated,
+  adminAuthenticated,
 }: {
   fallback: ReactNode;
   authenticated: ReactNode;
+  adminAuthenticated: ReactNode;
 }) {
   const { session } = useSession();
-  return session ? authenticated : fallback;
+
+  if (!session) return fallback;
+  if (session.role === "admin") return adminAuthenticated;
+  return authenticated;
 }

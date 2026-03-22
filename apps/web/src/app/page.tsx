@@ -1,4 +1,5 @@
 import { CandidateDashboard } from "@/components/CandidateDashboard";
+import { AdminDashboard } from "@/components/admin/AdminDashboard";
 import { EmailLoginCard } from "@/components/EmailLoginCard";
 import { HomeGate } from "@/components/HomeGate";
 
@@ -21,6 +22,7 @@ export default function HomePage() {
         </div>
       }
       authenticated={<CandidateDashboard />}
+      adminAuthenticated={<AdminDashboard />}
     />
   );
 }

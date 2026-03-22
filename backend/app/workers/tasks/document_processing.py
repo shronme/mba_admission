@@ -344,6 +344,7 @@ def _post_chat_notification(
                 thread_id=thread.id,
                 role=MessageRole.ASSISTANT,
                 content=content,
+                extra={"type": "file_notification"},
             )
         )
 

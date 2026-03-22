@@ -18,14 +18,167 @@ export type CandidateDto = {
   full_name: string;
   program_type: string;
   status: string;
+  stage?: string;
   profile: CandidateProfileDto | null;
 };
 
+export type AdminDto = {
+  id: string;
+  email: string;
+  full_name: string;
+};
+
+/** Unified auth response from POST /auth/enter */
+export type AuthEnterResponse = {
+  role: "candidate" | "admin";
+  session_token: string;
+  candidate?: CandidateDto;
+  admin?: AdminDto;
+  created?: boolean;
+};
+
+/** Legacy shape kept for backwards compatibility */
 export type EnterResponse = {
   created: boolean;
   candidate: CandidateDto;
   session_token?: string;
 };
+
+/** Admin API types */
+export type AdminCandidateListItem = {
+  id: string;
+  email: string | null;
+  full_name: string;
+  program_type: string;
+  status: string;
+  stage: string;
+  completeness_score: number;
+  profile_complete: boolean;
+  created_at: string | null;
+};
+
+export type AdminFileDto = {
+  id: string;
+  original_filename: string;
+  content_type: string | null;
+  byte_size: number | null;
+  status: string;
+  document_type: string | null;
+  created_at: string | null;
+};
+
+export type AdminCandidateDetail = {
+  id: string;
+  email: string | null;
+  full_name: string;
+  program_type: string;
+  status: string;
+  stage: string;
+  created_at: string | null;
+  profile: {
+    headline: string | null;
+    summary: string | null;
+    attributes: Record<string, unknown>;
+    profile_complete: boolean;
+    completeness_score: number;
+  } | null;
+  files: AdminFileDto[];
+};
+
+/** POST /auth/enter — unified login */
+export async function authEnter(body: {
+  email: string;
+  full_name?: string;
+}): Promise<AuthEnterResponse> {
+  const root = getApiBaseUrl();
+  if (!root) {
+    throw new Error(
+      "NEXT_PUBLIC_API_URL is not set. Copy apps/web/.env.example to apps/web/.env.local",
+    );
+  }
+  const res = await fetch(`${root}/auth/enter`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      email: body.email.trim(),
+      full_name: body.full_name?.trim() || undefined,
+    }),
+    cache: "no-store",
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /auth/enter: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(
+      `POST /auth/enter failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
+    );
+  }
+  return data as AuthEnterResponse;
+}
+
+/** Admin API helpers */
+export async function adminListCandidates(
+  sessionToken: string,
+): Promise<AdminCandidateListItem[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/admin/candidates`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`GET /admin/candidates failed: ${res.status} ${text}`);
+  const data = JSON.parse(text) as { candidates: AdminCandidateListItem[] };
+  return data.candidates ?? [];
+}
+
+export async function adminGetCandidate(
+  candidateId: string,
+  sessionToken: string,
+): Promise<AdminCandidateDetail> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/admin/candidates/${encodeURIComponent(candidateId)}`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  if (!res.ok)
+    throw new Error(`GET /admin/candidates/${candidateId} failed: ${res.status} ${text}`);
+  return JSON.parse(text) as AdminCandidateDetail;
+}
+
+export async function adminUploadFiles(
+  candidateId: string,
+  files: FileList,
+  sessionToken: string,
+): Promise<AdminFileDto[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const form = new FormData();
+  for (const file of Array.from(files)) {
+    form.append("files", file);
+  }
+  const res = await fetch(
+    `${root}/admin/candidates/${encodeURIComponent(candidateId)}/files/upload`,
+    {
+      method: "POST",
+      body: form,
+      headers: { Authorization: `Bearer ${sessionToken}` },
+      cache: "no-store",
+    },
+  );
+  const text = await res.text();
+  if (!res.ok) throw new Error(`POST admin upload failed: ${res.status} ${text}`);
+  const data = JSON.parse(text) as { files: AdminFileDto[] };
+  return data.files ?? [];
+}
 
 export async function enterWithEmail(body: {
   email: string;

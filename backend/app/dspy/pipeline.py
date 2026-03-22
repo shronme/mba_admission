@@ -9,7 +9,11 @@ from app.dspy.answer_relevance_classifier import (
     MockAnswerRelevanceClassifier,
     OpenAIAnswerRelevanceClassifier,
 )
-from app.dspy.intake_interviewer import MockIntakeInterviewer, OpenAIIntakeInterviewer
+from app.dspy.intake_interviewer import (
+    MockIntakeInterviewer,
+    OpenAIIntakeInterviewer,
+    _extract_profile_updates as _heuristic_extract,
+)
 from app.dspy.profile_agent import (
     CANDIDATE_INPUT_ATTRIBUTES,
     _ATTRIBUTE_SCHEMA_JSON,
@@ -42,10 +46,17 @@ def _build_conversation_history(recent_messages: list[dict[str, Any]]) -> str:
 
 
 def _last_assistant_message(recent_messages: list[dict[str, Any]]) -> str:
-    """Return the content of the most recent assistant message, or empty string."""
+    """Return the content of the most recent interviewer message, skipping file notifications."""
     for m in reversed(recent_messages):
-        if (m.get("role") or "").lower() == "assistant" and m.get("content"):
-            return m["content"]
+        if (m.get("role") or "").lower() != "assistant":
+            continue
+        if not m.get("content"):
+            continue
+        # Skip automated file-notification messages — they are not interview questions
+        # and must not be treated as the "last question asked".
+        if (m.get("extra") or {}).get("type") == "file_notification":
+            continue
+        return m["content"]
     return ""
 
 
@@ -118,11 +129,19 @@ def generate_assistant_response(
     last_question = _last_assistant_message(recent_messages)
     current_profile_json = json.dumps(candidate_attributes, ensure_ascii=False)
 
-    # Run ProfileAgent on the current profile to get quality-aware gaps and the real
-    # score. This is what the candidate sees as their progress indicator, so it must
-    # reflect content quality — not just whether a key is present.
+    # Apply a fast heuristic extraction on the user's message so the score we
+    # pass to the interviewer reflects the *current* answer, not the profile from
+    # the previous turn. This removes the one-turn lag where the bot would say
+    # "89%" right after an answer that clearly moves the needle.
+    heuristic_updates = _heuristic_extract(user_message, candidate_attributes)
+    projected_attributes = {**candidate_attributes, **heuristic_updates}
+
+    # Run ProfileAgent on the projected (heuristically updated) profile to get
+    # quality-aware gaps and a score that is close to what it will be after this
+    # turn's full extraction. This is what the candidate sees as their progress
+    # indicator, so it must reflect content quality — not just key presence.
     _, current_gaps, _, current_score = run_profile_agent(
-        candidate_attributes, use_openai=use_openai
+        projected_attributes, use_openai=use_openai
     )
     profile_gaps_json = json.dumps(current_gaps, ensure_ascii=False)
 
@@ -138,16 +157,6 @@ def generate_assistant_response(
             user_message=user_message,
         )
         answer_classification = str(getattr(rel_pred, "classification", "relevant"))
-
-        if answer_classification == "irrelevant":
-            alert = (
-                f"It looks like that didn't quite address what I asked. Let me re-ask:\n\n"
-                f"{last_question}"
-            )
-            if not has_files:
-                from app.dspy.intake_interviewer import _NO_FILES_NUDGE
-                alert += _NO_FILES_NUDGE
-            return alert, {}, False, -1  # score unchanged — no re-evaluation needed
 
     # --- Generate intake response ---
     interviewer = OpenAIIntakeInterviewer() if use_openai else MockIntakeInterviewer()

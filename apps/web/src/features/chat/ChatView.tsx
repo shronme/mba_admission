@@ -26,10 +26,12 @@ export function ChatView({
   sessionToken,
   currentStage = 1,
   onProfileUpdate,
+  lastUploadedAt,
 }: {
   sessionToken?: string | null;
   currentStage?: number;
   onProfileUpdate?: (intakeComplete: boolean) => void;
+  lastUploadedAt?: number;
 }) {
   const base = getApiBaseUrl();
   const [threadId, setThreadId] = useState<string | null>(null);
@@ -94,6 +96,21 @@ export function ChatView({
     }, 5000);
     return () => clearInterval(id);
   }, [threadId, busy, loadMessages, refreshIntakeProgress]);
+
+  // After a file upload, poll every 2 s for up to 30 s so the Celery
+  // notification appears promptly without waiting for the 5 s interval.
+  useEffect(() => {
+    if (!threadId || !lastUploadedAt) return;
+    const deadline = lastUploadedAt + 30_000;
+    const id = setInterval(() => {
+      if (Date.now() > deadline) {
+        clearInterval(id);
+        return;
+      }
+      void loadMessages(threadId).catch(() => {});
+    }, 2000);
+    return () => clearInterval(id);
+  }, [threadId, lastUploadedAt, loadMessages]);
 
   useEffect(() => {
     // Keep the transcript pinned to bottom while streaming.

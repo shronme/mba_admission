@@ -16,10 +16,14 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __table_args__ = (
         Index("ix_candidates_status", "status"),
         Index("ix_candidates_program_type", "program_type"),
+        UniqueConstraint("user_id", name="uq_candidates_user_id"),
     )
 
-    email: Mapped[str | None] = mapped_column(String(320), nullable=True, unique=True)
-    full_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     program_type: Mapped[ProgramType] = mapped_column(
         SQLEnum(ProgramType, name="program_type", native_enum=True),
         nullable=False,
@@ -40,6 +44,7 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     )
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+    user: Mapped["User"] = relationship(back_populates="candidate")  # type: ignore[name-defined]  # noqa: F821
     profile: Mapped[CandidateProfile | None] = relationship(
         back_populates="candidate",
         uselist=False,

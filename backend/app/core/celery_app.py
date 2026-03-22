@@ -37,6 +37,7 @@ celery_app.conf.update(
 # on this app (plain `shared_task` can bind to the wrong default app).
 import app.workers.tasks.document_processing  # noqa: E402, F401
 import app.workers.tasks.ping_redis  # noqa: E402, F401
+import app.workers.tasks.profile_update  # noqa: E402, F401
 import app.workers.tasks.sample_ai_job_task  # noqa: E402, F401
 import app.workers.tasks.wiring_smoke_task  # noqa: E402, F401
 

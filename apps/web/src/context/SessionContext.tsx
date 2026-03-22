@@ -9,30 +9,36 @@ import {
   useState,
 } from "react";
 
-import type { CandidateDto, EnterResponse } from "@/lib/api";
+import type { AdminDto, AuthEnterResponse, CandidateDto } from "@/lib/api";
+import { authEnter } from "@/lib/api";
 
-const STORAGE_KEY = "mba_admissions_candidate_session_v1";
+const STORAGE_KEY = "mba_admissions_session_v2";
 
-type SessionState = EnterResponse | null;
+export type AppSession = {
+  role: "candidate" | "admin";
+  session_token: string;
+  candidate?: CandidateDto;
+  admin?: AdminDto;
+};
 
 type SessionContextValue = {
-  session: SessionState;
-  setSession: (value: SessionState) => void;
+  session: AppSession | null;
+  setSession: (value: AppSession | null) => void;
+  signIn: (email: string) => Promise<AuthEnterResponse>;
   signOut: () => void;
 };
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
-function readStoredSession(): SessionState {
+function readStoredSession(): AppSession | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as EnterResponse;
-    // If the cached session is from before `session_token` existed,
-    // treat it as unauthenticated so we don't call protected endpoints with no auth header.
-    if (!parsed?.candidate?.id) return null;
-    if (typeof parsed.session_token !== "string" || !parsed.session_token) return null;
+    const parsed = JSON.parse(raw) as AppSession;
+    if (!parsed?.role || !parsed?.session_token) return null;
+    if (parsed.role === "candidate" && !parsed.candidate?.id) return null;
+    if (parsed.role === "admin" && !parsed.admin?.id) return null;
     return parsed;
   } catch {
     return null;
@@ -40,13 +46,13 @@ function readStoredSession(): SessionState {
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSessionState] = useState<SessionState>(null);
+  const [session, setSessionState] = useState<AppSession | null>(null);
 
   useEffect(() => {
     setSessionState(readStoredSession());
   }, []);
 
-  const setSession = useCallback((value: SessionState) => {
+  const setSession = useCallback((value: AppSession | null) => {
     setSessionState(value);
     if (typeof window === "undefined") return;
     if (value === null) {
@@ -56,13 +62,28 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signIn = useCallback(
+    async (email: string): Promise<AuthEnterResponse> => {
+      const res = await authEnter({ email });
+      const appSession: AppSession = {
+        role: res.role,
+        session_token: res.session_token,
+        candidate: res.candidate,
+        admin: res.admin,
+      };
+      setSession(appSession);
+      return res;
+    },
+    [setSession],
+  );
+
   const signOut = useCallback(() => {
     setSession(null);
   }, [setSession]);
 
   const value = useMemo(
-    () => ({ session, setSession, signOut }),
-    [session, setSession, signOut],
+    () => ({ session, setSession, signIn, signOut }),
+    [session, setSession, signIn, signOut],
   );
 
   return (
@@ -78,7 +99,16 @@ export function useSession(): SessionContextValue {
   return ctx;
 }
 
+/** Convenience: returns the candidate dto when role=candidate, else null */
 export function useOptionalCandidate(): CandidateDto | null {
   const ctx = useContext(SessionContext);
-  return ctx?.session?.candidate ?? null;
+  if (!ctx?.session || ctx.session.role !== "candidate") return null;
+  return ctx.session.candidate ?? null;
+}
+
+/** Convenience: returns the admin dto when role=admin, else null */
+export function useOptionalAdmin(): AdminDto | null {
+  const ctx = useContext(SessionContext);
+  if (!ctx?.session || ctx.session.role !== "admin") return null;
+  return ctx.session.admin ?? null;
 }

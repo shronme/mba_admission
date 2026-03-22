@@ -33,36 +33,46 @@ class OpenAIIntakeInterviewSignature(dspy.Signature):
     """
     You are an experienced MBA admissions coach conducting a structured intake interview.
 
-    CRITICAL RULE — STAY ON THE CURRENT TOPIC:
-    The field `last_question_asked` tells you what you asked the candidate last turn.
-    Before moving to a new topic, verify that the candidate's answer actually addresses
-    that question. If the answer is off-topic or only tangentially related, acknowledge
-    what they said, clarify what you were asking, and re-ask the same question.
-    Only advance when the current topic has a real, specific answer.
+    CRITICAL RULE — ALWAYS MOVE THE CONVERSATION FORWARD:
+    Never mechanically repeat your last question verbatim. Even if `answer_classification`
+    is 'irrelevant', briefly acknowledge what the candidate said and then ask the single
+    most important unanswered question from `profile_gaps_json`. Use `last_question_asked`
+    as context for what you were trying to learn, but always re-frame it naturally rather
+    than copy-pasting it.
 
     QUESTION GENERATION:
-    - Look at `profile_gaps_json` — the ordered list of profile attributes still missing
-      or insufficient. Pick the most important gap to address next.
+    - Look at `profile_gaps_json` — the ordered list of profile attributes that are still
+      missing OR present but too thin/vague. Pick the most important gap to address next.
+    - IMPORTANT: An attribute in `profile_gaps_json` may already have partial content in
+      `current_profile_json`. In that case the attribute is THIN, not absent. When this
+      happens you MUST:
+        1. Acknowledge what you already have ("I've got your fintech background noted —").
+        2. Explain specifically what additional detail would make it stronger (seniority
+           level, scope, breadth, etc.).
+        3. Ask a targeted follow-up, NOT a generic "tell me about X" question.
+      Never ask about an attribute from scratch if content already exists for it.
     - Use `attribute_schema_json` to understand what good content looks like for that
-      attribute, then craft a natural, conversational question that would draw out that
-      information from this specific candidate.
-    - The question must NOT be scripted or generic. Reference what the candidate has
-      already shared. Make it feel like a real coaching conversation.
+      attribute, then craft a natural, conversational question that would draw out the
+      missing detail from this specific candidate.
     - Ask exactly ONE question per turn.
 
     PROGRESS COMMUNICATION:
-    - `completeness_score` is an integer 0–100 reflecting how complete the profile is.
+    - `completeness_score` is an integer 0–100 reflecting how complete the profile is,
+      already accounting for the candidate's most recent answer.
     - Naturally weave a brief progress indicator into your response each turn — but keep
       it encouraging and conversational, not robotic. Examples:
         "We're about 40% of the way through — you're making solid progress."
         "You're at 75% — just a couple of areas left to cover."
         "Almost there — the profile is 90% complete."
+    - If the score has not visibly changed since the prior turn, do NOT repeat the same
+      number — instead say something like "still making progress" or skip the percentage.
     - Place the progress note at the END of your acknowledgement, before the next question.
     - Keep it to one short sentence. Never repeat it mid-response.
 
     OTHER RULES:
     - Briefly acknowledge the candidate's answer before asking the next question.
-    - Skip attributes already captured in current_profile_json.
+    - Skip attributes already captured AND complete in current_profile_json (i.e., not in
+      profile_gaps_json).
     - If answer_classification is 'candidate_question', answer the candidate's question
       clearly and concisely first, then re-ask last_question_asked.
     - If has_files is 'false', append this reminder at the very end (new line):
@@ -78,10 +88,19 @@ class OpenAIIntakeInterviewSignature(dspy.Signature):
         desc="The exact question you asked the candidate in the previous turn. Empty string on the first turn."
     )
     current_profile_json: str = dspy.InputField(
-        desc="JSON object of profile attributes already captured. Keys present mean that area is covered."
+        desc=(
+            "JSON object of profile attributes already captured. A key being present means content "
+            "exists for that attribute, but it may still appear in profile_gaps_json if the content "
+            "is thin or vague. Use this to avoid re-asking from scratch — build on what's here."
+        )
     )
     profile_gaps_json: str = dspy.InputField(
-        desc="JSON array of candidate-input attribute keys that are still missing or insufficient, in priority order."
+        desc=(
+            "JSON array of candidate-input attribute keys that are still missing or insufficient "
+            "(thin/vague), in priority order. An attribute in this list may already have partial "
+            "content in current_profile_json — in that case it is THIN, not absent. Always check "
+            "current_profile_json before deciding how to frame your follow-up."
+        )
     )
     attribute_schema_json: str = dspy.InputField(
         desc="JSON object mapping attribute keys to descriptions of what good content looks like."
@@ -95,15 +114,23 @@ class OpenAIIntakeInterviewSignature(dspy.Signature):
     user_message: str = dspy.InputField(desc="The candidate's latest message.")
     has_files: str = dspy.InputField(desc="'true' if the candidate has uploaded documents, 'false' otherwise.")
     answer_classification: str = dspy.InputField(
-        desc="One of: relevant, candidate_question. 'relevant' means the message attempted to answer the question."
+        desc=(
+            "One of: relevant, irrelevant, candidate_question. "
+            "'relevant' means the message addressed the question. "
+            "'irrelevant' means the message didn't address the question — gently acknowledge it, "
+            "then ask the single most important unanswered question from profile_gaps_json "
+            "(do NOT mechanically repeat last_question_asked verbatim). "
+            "'candidate_question' means the candidate asked their own question."
+        )
     )
 
     response: str = dspy.OutputField(
         desc=(
-            "Your reply. Acknowledge the candidate's answer, then ask a targeted question "
-            "about the highest-priority gap from profile_gaps_json. If the answer did NOT "
-            "address last_question_asked, redirect and re-ask the same question instead of "
-            "moving on. If candidate_question: answer first, then re-ask last_question_asked."
+            "Your reply. Briefly acknowledge the candidate's message, then ask exactly one "
+            "targeted question about the highest-priority gap from profile_gaps_json. "
+            "Never copy-paste last_question_asked verbatim — always re-frame naturally. "
+            "If answer_classification is 'candidate_question': answer their question first, "
+            "then ask the most important gap question."
         )
     )
     profile_updates_json: str = dspy.OutputField(
@@ -192,20 +219,19 @@ class MockIntakeInterviewer(dspy.Module):
         progress_note = _build_progress_note(completeness_score)
 
         if answer_classification == "candidate_question":
-            if last_question_asked:
-                reask = last_question_asked
-            elif current_gap:
-                reask = _MOCK_QUESTION_HINTS.get(
+            next_q = (
+                _MOCK_QUESTION_HINTS.get(
                     current_gap,
                     f"can you tell me about your {current_gap.replace('_', ' ')}?",
                 )
-            else:
-                reask = all_done_message
+                if current_gap
+                else all_done_message
+            )
             response = (
                 "That's a great question. The MBA admissions process typically takes 6–12 months "
                 "from preparation to decision, and strong applications combine a clear narrative, "
                 "compelling recommendations, and a polished set of essays.\n\n"
-                f"Now, back to where we were — {reask}"
+                f"Now, back to what I'd love to understand — {next_q}"
             )
             profile_updates: dict = {}
         else:

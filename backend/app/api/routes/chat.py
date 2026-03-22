@@ -121,9 +121,14 @@ async def create_thread(
         status=ChatThreadStatus.ACTIVE,
         extra={"stage": "intake"},
     )
-    # Load candidate + profile so the greeting can resume from where they left off.
+    # Load candidate + user + profile so the greeting can resume from where they left off.
+    from sqlalchemy.orm import selectinload
     candidate = (
-        await session.execute(select(Candidate).where(Candidate.id == candidate_id))
+        await session.execute(
+            select(Candidate)
+            .options(selectinload(Candidate.user))
+            .where(Candidate.id == candidate_id)
+        )
     ).scalar_one()
     profile = (
         await session.execute(
@@ -140,7 +145,7 @@ async def create_thread(
     # Initial assistant message — personalised to existing profile progress.
     greeting_profile_complete = bool(profile.profile_complete) if profile else False
     initial, _ = generate_initial_greeting(
-        candidate_name=candidate.full_name,
+        candidate_name=candidate.user.full_name,
         existing_attributes=profile.attributes if profile else None,
         has_files=greeting_file_count > 0,
         profile_complete=greeting_profile_complete,
@@ -229,11 +234,16 @@ async def stream_assistant_response(
     file_count = int(res.scalar_one() or 0)
 
     # Memory / context injection (MVP): candidate profile + extracted doc snippets + recent messages.
-    candidate = (await session.execute(select(Candidate).where(Candidate.id == candidate_id))).scalar_one()
+    from sqlalchemy.orm import selectinload as _sil
+    candidate = (
+        await session.execute(
+            select(Candidate).options(_sil(Candidate.user)).where(Candidate.id == candidate_id)
+        )
+    ).scalar_one()
     profile = (await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))).scalar_one_or_none()
     profile_complete: bool = bool(profile.profile_complete) if profile is not None else False
     candidate_profile: dict[str, Any] = {
-        "full_name": candidate.full_name,
+        "full_name": candidate.user.full_name,
         "attributes": profile.attributes if profile is not None else None,
     }
 
@@ -251,7 +261,11 @@ async def stream_assistant_response(
     )
     recent_messages_raw = list(recent_result.scalars().all())
     recent_messages = [
-        {"role": m.role.value if hasattr(m.role, "value") else str(m.role), "content": m.content}
+        {
+            "role": m.role.value if hasattr(m.role, "value") else str(m.role),
+            "content": m.content,
+            "extra": m.extra or {},
+        }
         for m in reversed(recent_messages_raw)
         if m.content
     ]

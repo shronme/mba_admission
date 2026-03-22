@@ -122,8 +122,14 @@ async def upload_files(
 
     for f in uploaded:
         if f.status == FileStatus.UPLOADING:
-            process_uploaded_document.delay(str(f.id))
-            logger.info("files_upload task_enqueued file_id=%s", f.id)
+            try:
+                process_uploaded_document.delay(str(f.id))
+                logger.info("files_upload task_enqueued file_id=%s", f.id)
+            except Exception:
+                logger.exception(
+                    "files_upload task_enqueue_failed file_id=%s — processing will not run",
+                    f.id,
+                )
 
     logger.info("files_upload done candidate_id=%s count=%s", candidate_id, len(uploaded))
     return {"files": [_file_to_dto(f) for f in uploaded]}
