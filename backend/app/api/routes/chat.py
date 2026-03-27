@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 from typing import Any, AsyncGenerator
@@ -22,6 +23,7 @@ from app.db.models.files import UploadedFile
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.chat_repo import ChatRepository
 from app.dspy.pipeline import generate_assistant_response, generate_initial_greeting
+from app.dspy.profile_language_normalize import run_profile_attributes_english_normalize
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -65,11 +67,11 @@ async def _retrieve_doc_snippets(
                 candidate_id,
             )
 
-    # Fallback: inject raw extracted_text from up to 3 READY files.
+    # Fallback: inject raw extracted_text from up to 3 processed files (ready or still in review).
     docs_result = await session.execute(
         select(UploadedFile)
         .where(UploadedFile.candidate_id == candidate_id)
-        .where(UploadedFile.status == FileStatus.READY)
+        .where(UploadedFile.status.in_((FileStatus.READY, FileStatus.REVIEWING)))
         .limit(3)
     )
     snippets = []
@@ -113,7 +115,36 @@ async def create_thread(
     candidate_id: UUID = Depends(get_candidate_id_from_bearer_token),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
+    # Reuse the latest active thread when one exists so the UI matches
+    # `_post_chat_notification` in document_processing (same ordering), avoiding
+    # orphan threads from remounts / Strict Mode and missing upload messages.
+    existing = (
+        await session.execute(
+            select(ChatThread)
+            .where(ChatThread.candidate_id == candidate_id)
+            .where(ChatThread.status == ChatThreadStatus.ACTIVE)
+            .order_by(ChatThread.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        logger.info(
+            "chat_thread_reused candidate_id=%s thread_id=%s",
+            candidate_id,
+            existing.id,
+        )
+        return {"thread_id": str(existing.id)}
+
     chat_repo = ChatRepository(session)
+
+    existing = await chat_repo.get_latest_active_thread(candidate_id)
+    if existing is not None:
+        logger.info(
+            "chat_thread_reused candidate_id=%s thread_id=%s",
+            candidate_id,
+            existing.id,
+        )
+        return {"thread_id": str(existing.id)}
 
     thread = await chat_repo.create_thread(
         candidate_id=candidate_id,
@@ -138,7 +169,7 @@ async def create_thread(
     file_count_res = await session.execute(
         select(func.count(UploadedFile.id))
         .where(UploadedFile.candidate_id == candidate_id)
-        .where(UploadedFile.status == FileStatus.READY)
+        .where(UploadedFile.status.in_((FileStatus.READY, FileStatus.REVIEWING)))
     )
     greeting_file_count = int(file_count_res.scalar_one() or 0)
 
@@ -204,13 +235,18 @@ async def stream_assistant_response(
 
     chat_repo = ChatRepository(session)
 
-    # Persist user message immediately.
+    # Persist the user message in its own transaction so it gets an earlier
+    # created_at than the assistant placeholder. Both use server_default=func.now()
+    # which returns the PostgreSQL transaction start time — committing them together
+    # would give them identical timestamps and cause non-deterministic ordering.
     await chat_repo.add_message(
         thread_id,
         role=MessageRole.USER,
         content=body.content,
     )
-    # Placeholder assistant message (filled after streaming).
+    await session.commit()
+
+    # Placeholder assistant message (content filled at end of streaming).
     assistant_msg = await chat_repo.add_message(
         thread_id,
         role=MessageRole.ASSISTANT,
@@ -229,7 +265,7 @@ async def stream_assistant_response(
     res = await session.execute(
         select(func.count(UploadedFile.id))
         .where(UploadedFile.candidate_id == candidate_id)
-        .where(UploadedFile.status == FileStatus.READY),
+        .where(UploadedFile.status.in_((FileStatus.READY, FileStatus.REVIEWING))),
     )
     file_count = int(res.scalar_one() or 0)
 
@@ -241,12 +277,6 @@ async def stream_assistant_response(
         )
     ).scalar_one()
     profile = (await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))).scalar_one_or_none()
-    profile_complete: bool = bool(profile.profile_complete) if profile is not None else False
-    stored_completeness_score: int = int(profile.completeness_score) if profile is not None else 0
-    candidate_profile: dict[str, Any] = {
-        "full_name": candidate.user.full_name,
-        "attributes": profile.attributes if profile is not None else None,
-    }
 
     docs_snippets: list[str] = await _retrieve_doc_snippets(
         session=session,
@@ -270,6 +300,19 @@ async def stream_assistant_response(
         for m in reversed(recent_messages_raw)
         if m.content
     ]
+
+    # Refresh the profile object so we pick up any completeness updates that the
+    # Celery extraction task may have committed concurrently since the initial load.
+    # Without this, a candidate's turn that starts while Celery is still running
+    # sees a stale profile_complete=False and incorrectly routes to IntakeInterviewer.
+    if profile is not None:
+        await session.refresh(profile)
+    profile_complete: bool = bool(profile.profile_complete) if profile is not None else False
+    stored_completeness_score: int = int(profile.completeness_score) if profile is not None else 0
+    candidate_profile: dict[str, Any] = {
+        "full_name": candidate.user.full_name,
+        "attributes": profile.attributes if profile is not None else None,
+    }
 
     with tracer.start_as_current_span(
         "chat.pipeline",
@@ -313,6 +356,29 @@ async def stream_assistant_response(
                     candidate_repo = CandidateRepository(session)
                     if profile_updates:
                         await candidate_repo.merge_profile_attributes(candidate_id, profile_updates)
+                        use_openai_norm = (
+                            (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
+                            and bool(os.getenv("OPENAI_API_KEY"))
+                        )
+                        if use_openai_norm:
+                            prof_row = (
+                                await session.execute(
+                                    select(CandidateProfile).where(
+                                        CandidateProfile.candidate_id == candidate_id
+                                    )
+                                )
+                            ).scalar_one_or_none()
+                            if prof_row is not None:
+                                attrs_before = dict(prof_row.attributes or {})
+                                attrs_after = await asyncio.to_thread(
+                                    functools.partial(
+                                        run_profile_attributes_english_normalize,
+                                        use_openai=True,
+                                    ),
+                                    attrs_before,
+                                )
+                                if attrs_after != attrs_before:
+                                    prof_row.attributes = attrs_after
                     if is_now_complete or score_changed:
                         await candidate_repo.set_profile_complete(
                             candidate_id,

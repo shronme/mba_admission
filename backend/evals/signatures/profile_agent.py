@@ -149,4 +149,4 @@ REGISTRY: dict[str, type[dspy.Signature]] = {
     "v3_no_score": ProfileAgentV3,
 }
 
-DEFAULT = "v1_baseline"
+DEFAULT = "v2_threshold_explicit"

@@ -427,7 +427,7 @@ def process_uploaded_document(self, file_id: str) -> dict:
             file_row = session.get(UploadedFile, file_uuid)
             if file_row is not None:
                 file_row.document_type = doc_type
-                file_row.status = FileStatus.READY
+                file_row.status = FileStatus.REVIEWING
                 file_row.extra = {
                     **(file_row.extra or {}),
                     "extracted_text": extracted_text,

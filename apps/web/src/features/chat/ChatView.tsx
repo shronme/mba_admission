@@ -97,20 +97,25 @@ export function ChatView({
     return () => clearInterval(id);
   }, [threadId, busy, loadMessages, refreshIntakeProgress]);
 
-  // After a file upload, poll every 2 s for up to 30 s so the Celery
-  // notification appears promptly without waiting for the 5 s interval.
+  // After a file upload, refetch messages + profile progress immediately then every
+  // 2 s for up to 30 s so Celery chat + completeness updates land promptly.
   useEffect(() => {
     if (!threadId || !lastUploadedAt) return;
     const deadline = lastUploadedAt + 30_000;
+    const tick = () => {
+      void loadMessages(threadId).catch(() => {});
+      void refreshIntakeProgress();
+    };
+    tick();
     const id = setInterval(() => {
       if (Date.now() > deadline) {
         clearInterval(id);
         return;
       }
-      void loadMessages(threadId).catch(() => {});
+      tick();
     }, 2000);
     return () => clearInterval(id);
-  }, [threadId, lastUploadedAt, loadMessages]);
+  }, [threadId, lastUploadedAt, loadMessages, refreshIntakeProgress]);
 
   useEffect(() => {
     // Keep the transcript pinned to bottom while streaming.
@@ -202,13 +207,14 @@ export function ChatView({
   }
 
   const stageName = STAGES[Math.max(0, Math.min(currentStage - 1, STAGES.length - 1))].name;
+  const showIntakeProfileBar = currentStage === 1;
 
   const profileFillColor =
     intakeComplete || intakeScore >= 75
-      ? "bg-gold-500"
+      ? "chat-profile-fill-complete"
       : intakeScore >= 40
-        ? "bg-gold-400"
-        : "bg-cream-300";
+        ? "chat-profile-fill-mid"
+        : "chat-profile-fill-low";
 
   return (
     <div className="chat-panel">
@@ -233,25 +239,27 @@ export function ChatView({
         </div>
       </div>
 
-      {/* Profile completeness bar */}
-      <div className="chat-profile-bar">
-        <div className="mb-1 flex items-center justify-between">
-          <span className="text-[11px] text-neutral-400">
-            {intakeComplete ? "Profile complete" : `Profile ${intakeScore}% complete`}
-          </span>
-          {intakeComplete && (
-            <span className="text-[11px] font-semibold text-gold-600">
-              ✓ Ready for research
+      {/* Intake-only: profile completeness drives stage advance; hide once past Intake so it is not mistaken for current-stage progress. */}
+      {showIntakeProfileBar && (
+        <div className="chat-profile-bar">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[11px] text-neutral-400">
+              {intakeComplete ? "Profile complete" : `Profile ${intakeScore}% complete`}
             </span>
-          )}
+            {intakeComplete && (
+              <span className="text-[11px] font-semibold text-gold-600">
+                ✓ Ready for research
+              </span>
+            )}
+          </div>
+          <div className="chat-profile-track">
+            <div
+              className={`chat-profile-fill ${profileFillColor}`}
+              style={{ width: `${Math.min(100, Math.max(0, intakeScore))}%` }}
+            />
+          </div>
         </div>
-        <div className="chat-profile-track">
-          <div
-            className={`chat-profile-fill ${profileFillColor}`}
-            style={{ width: `${Math.min(100, Math.max(0, intakeScore))}%` }}
-          />
-        </div>
-      </div>
+      )}
 
       <div
         ref={listRef}
@@ -260,7 +268,7 @@ export function ChatView({
       >
         {messages.length === 0 ? (
           <div className="text-sm text-neutral-500">
-            Starting intake…
+            {showIntakeProfileBar ? "Starting intake…" : "Messages will appear here."}
           </div>
         ) : (
           <div className="space-y-4">
@@ -282,7 +290,7 @@ export function ChatView({
                             <p className="mb-2 last:mb-0">{children}</p>
                           ),
                           strong: ({ children }) => (
-                            <strong className="font-semibold text-gold-600">{children}</strong>
+                            <strong className="chat-prose-strong">{children}</strong>
                           ),
                           em: ({ children }) => (
                             <em className="italic text-neutral-500">{children}</em>
@@ -299,7 +307,7 @@ export function ChatView({
                           code: ({ children }) => (
                             <code className="code-inline">{children}</code>
                           ),
-                          hr: () => <hr className="my-2 border-cream-200" />,
+                          hr: () => <hr className="chat-prose-hr" />,
                         }}
                       >
                         {m.content}

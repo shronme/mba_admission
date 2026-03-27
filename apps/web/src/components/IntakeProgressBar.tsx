@@ -25,7 +25,7 @@ export function IntakeProgressBar({ score, complete }: Props) {
       <div className="flex items-center justify-between mb-1">
         <span className="text-xs font-medium text-neutral-500">{label}</span>
         {complete && (
-          <span className="text-xs font-semibold text-emerald-600">✓ Ready for research</span>
+          <span className="intake-complete-label">✓ Ready for research</span>
         )}
       </div>
       <div className="intake-bar-track">

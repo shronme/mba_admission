@@ -146,7 +146,10 @@ async def download_file(
     if row is None or row.candidate_id != candidate_id:
         raise HTTPException(status_code=404, detail="File not found")
 
-    if row.storage_uri == "pending" or row.status != FileStatus.READY:
+    if row.storage_uri == "pending" or row.status not in (
+        FileStatus.READY,
+        FileStatus.REVIEWING,
+    ):
         logger.warning(
             "files_download not_ready file_id=%s status=%s storage_uri=%s",
             file_id,

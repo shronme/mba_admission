@@ -34,6 +34,7 @@ const DOC_TYPE_COLORS: Record<string, string> = {
 
 const STATUS_ICONS: Record<string, string> = {
   ready: "✓",
+  reviewing: "⏳",
   uploading: "⏳",
   failed: "✗",
   deleted: "✗",
@@ -50,6 +51,8 @@ function FileRow({ file }: { file: AdminFileDto }) {
   const typeColor = DOC_TYPE_COLORS[file.document_type ?? "unclassified"] ?? "bg-neutral-100 text-neutral-500";
   const statusIcon = STATUS_ICONS[file.status] ?? "?";
   const isReady = file.status === "ready";
+  const isInProgress =
+    file.status === "uploading" || file.status === "reviewing";
 
   return (
     <div className="flex items-center gap-3 rounded-lg border border-neutral-200 bg-white p-3">
@@ -69,7 +72,7 @@ function FileRow({ file }: { file: AdminFileDto }) {
       </div>
       <div
         className={`shrink-0 text-xs font-medium ${
-          isReady ? "text-emerald-600" : file.status === "uploading" ? "text-amber-500" : "text-red-500"
+          isReady ? "text-emerald-600" : isInProgress ? "text-amber-500" : "text-red-500"
         }`}
       >
         {statusIcon} {file.status}

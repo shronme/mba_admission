@@ -72,6 +72,11 @@ PROFILE_ATTRIBUTE_SCHEMA: dict[str, str] = {
         "Honest risks in your application — credibility gaps, pivot concerns, profile "
         "weaknesses, or narratives that could undermine your case."
     ),
+    "target_programs": (
+        "The specific MBA programs and schools the candidate is targeting or considering, "
+        "including their reasoning. May include reach, match, and safety schools as well as "
+        "program type preferences (full-time, part-time, EMBA) and intake year."
+    ),
     "strategy": (
         "The recommended application strategy (e.g. Upgrade, Purpose Pivot, Hybrid) derived "
         "from the full profile. Should name the approach and explain the rationale."
@@ -143,7 +148,8 @@ class ProfileCompletenessSignature(dspy.Signature):
       too thin. Empty array [] if complete.
     - synthesized_attributes_json: JSON object with values for all 5 synthesized
       attributes, derived from the available profile data. Provide best-effort
-      synthesis even when the profile is incomplete.
+      synthesis even when the profile is incomplete. All synthesized strings
+      must be in English (translate if source material is in another language).
     """
 
     profile_attributes_json: str = dspy.InputField(
@@ -170,7 +176,7 @@ class ProfileCompletenessSignature(dspy.Signature):
         desc=(
             "JSON object with synthesized values for: strategy, narrative_direction, "
             "key_positioning, emphasis_areas, downplay_areas. Base synthesis on whatever "
-            "profile data is available."
+            "profile data is available. All values must be English."
         )
     )
 

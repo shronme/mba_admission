@@ -11,6 +11,18 @@ import { STAGES } from "@/components/StageProgressBar";
 
 const STAGE_NAMES = STAGES.map((s) => s.name);
 
+const FILE_STATUS_LABELS: Record<UploadedFileDto["status"], string> = {
+  uploading: "Uploading",
+  reviewing: "Reviewing",
+  ready: "Ready",
+  failed: "Failed",
+  deleted: "Deleted",
+};
+
+function formatFileStatus(status: UploadedFileDto["status"]): string {
+  return FILE_STATUS_LABELS[status];
+}
+
 function ChevronIcon({ open }: { open: boolean }) {
   return (
     <svg
@@ -97,9 +109,11 @@ export function SidebarDocuments({
     })();
   }, [sessionToken, canLoad]);
 
-  // Poll while any file is processing
+  // Poll while upload or async profile review is in progress
   useEffect(() => {
-    const hasProcessing = files.some((f) => f.status === "uploading");
+    const hasProcessing = files.some(
+      (f) => f.status === "uploading" || f.status === "reviewing",
+    );
     if (!hasProcessing || !canLoad) return;
     const id = setTimeout(async () => {
       try {
@@ -248,9 +262,7 @@ export function SidebarDocuments({
                     {stageName}
                   </span>
                   {isCurrent && (
-                    <span className="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-600">
-                      Current
-                    </span>
+                    <span className="sidebar-current-badge">Current</span>
                   )}
                 </div>
                 <ChevronIcon open={isOpen} />
@@ -303,7 +315,7 @@ export function SidebarDocuments({
                               {f.byte_size !== null
                                 ? `${(f.byte_size / 1024).toFixed(1)} KB`
                                 : ""}
-                              {f.status ? ` · ${f.status}` : ""}
+                              {f.status ? ` · ${formatFileStatus(f.status)}` : ""}
                             </p>
                           </div>
                           <button

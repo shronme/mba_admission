@@ -32,6 +32,30 @@ _DISALLOWED_FULL_ESSAY_PHRASES = (
 
 _OFF_TOPIC_KEYWORDS = ("calculus", "photosynthesis", "quantum", "chemistry")
 
+# Attributes that are populated by CV/document extraction. Their presence signals
+# that at least one document has been fully processed — used for phase detection.
+_DOC_DERIVED_ATTRS = frozenset({"domain_base", "core_identity", "core_strengths", "transferable_assets"})
+
+
+def _compute_intake_phase(file_count: int, attributes: dict[str, Any]) -> str:
+    """
+    Determine the current intake phase from observable state.
+
+    "intro"       — no documents uploaded yet; focus on requesting CV + life story.
+    "bridge"      — documents uploaded but not yet processed (or being processed);
+                    ask the candidate about their target programs while extraction runs.
+    "gap_filling" — documents have been processed (doc-derived attributes present) OR the
+                    candidate has already answered the target_programs bridge question;
+                    conduct gap-targeted interview questions.
+    """
+    if file_count == 0:
+        return "intro"
+    has_doc_content = any(attributes.get(k) for k in _DOC_DERIVED_ATTRS)
+    target_programs_filled = bool(attributes.get("target_programs"))
+    if has_doc_content or target_programs_filled:
+        return "gap_filling"
+    return "bridge"
+
 
 def _build_conversation_history(recent_messages: list[dict[str, Any]]) -> str:
     """Format recent messages as INTERVIEWER / CANDIDATE lines for the intake modules."""
@@ -52,9 +76,10 @@ def _last_assistant_message(recent_messages: list[dict[str, Any]]) -> str:
             continue
         if not m.get("content"):
             continue
-        # Skip automated file-notification messages — they are not interview questions
+        # Skip automated system messages — they are not interview questions
         # and must not be treated as the "last question asked".
-        if (m.get("extra") or {}).get("type") == "file_notification":
+        msg_type = (m.get("extra") or {}).get("type")
+        if msg_type in ("file_notification", "extraction_summary"):
             continue
         return m["content"]
     return ""
@@ -80,7 +105,7 @@ def generate_assistant_response(
       - completeness_score: int — 0-100 quality-aware score from ProfileAgent (stable, to be persisted)
 
     When profile_complete=True the ResearchAgent handles the response.
-    When profile_complete=False the IntakeInterviewer conducts a gap-driven question.
+    When profile_complete=False the IntakeInterviewer conducts a phase-aware interview.
     """
 
     use_openai = (
@@ -126,6 +151,7 @@ def generate_assistant_response(
 
     # --- Intake Interview flow ---
     has_files = file_count > 0
+    intake_phase = _compute_intake_phase(file_count, candidate_attributes)
     conversation_history = _build_conversation_history(recent_messages)
     last_question = _last_assistant_message(recent_messages)
     current_profile_json = json.dumps(candidate_attributes, ensure_ascii=False)
@@ -164,6 +190,7 @@ def generate_assistant_response(
     out = run_dspy_module(
         interviewer,
         candidate_name=candidate_name or "Candidate",
+        intake_phase=intake_phase,
         last_question_asked=last_question,
         current_profile_json=current_profile_json,
         profile_gaps_json=profile_gaps_json,
@@ -198,6 +225,16 @@ def generate_assistant_response(
     if synthesized:
         profile_updates = {**profile_updates, **synthesized}
 
+    # If the profile just crossed the completion threshold this turn, override the
+    # interviewer's response — which was generated before we knew extraction would
+    # push the score to 100 — with a clean handoff so no further questions are asked.
+    if is_complete and not profile_complete:
+        response_text = (
+            "That's exactly what I needed — your profile is now complete. "
+            "I have a comprehensive picture of your background, strengths, and goals. "
+            "Give me a moment to analyse the best school fit and application strategy for you."
+        )
+
     return response_text, profile_updates, is_complete, post_update_score
 
 
@@ -212,10 +249,8 @@ def generate_initial_greeting(
     Generate the opening message when a new thread is created.
 
     If the profile is already complete, returns the ResearchAgent handover message.
-    Otherwise returns a personalised greeting that picks up from the first uncovered gap.
+    Otherwise returns a greeting appropriate to the candidate's current state.
     """
-    from app.dspy.intake_interviewer import _NO_FILES_NUDGE
-
     attrs = existing_attributes or {}
     name_part = f" {candidate_name}" if candidate_name else ""
 
@@ -233,39 +268,56 @@ def generate_initial_greeting(
         return str(getattr(out, "response", "")), {}
 
     gaps = get_profile_gaps(attrs)
-    first_gap = gaps[0] if gaps else None
-
     answered_count = len(CANDIDATE_INPUT_ATTRIBUTES) - len(gaps)
 
-    if answered_count == 0:
-        preamble = (
-            f"Hi{name_part}! I'm your MBA admissions coach. "
-            "I'll ask you a series of questions to understand your background, goals, and motivations — "
-            "this will help us build a strong, personalised application strategy together.\n\n"
-        )
-    else:
-        covered = ", ".join(k.replace("_", " ") for k in CANDIDATE_INPUT_ATTRIBUTES if k in attrs)
-        preamble = (
-            f"Welcome back{name_part}! We've already covered: {covered}. "
-            "Let's pick up where we left off.\n\n"
-        )
+    # Returning candidate — pick up where they left off
+    if answered_count > 0 or has_files:
+        covered = ", ".join(k.replace("_", " ") for k in CANDIDATE_INPUT_ATTRIBUTES if attrs.get(k))
+        preamble = f"Welcome back{name_part}!"
+        if covered:
+            preamble += f" We've already covered: {covered}."
+        preamble += " Let's pick up where we left off.\n\n"
 
-    if first_gap:
-        from app.dspy.profile_agent import PROFILE_ATTRIBUTE_SCHEMA
-        schema_desc = PROFILE_ATTRIBUTE_SCHEMA.get(first_gap, "").split(".")[0]
-        next_question = (
-            f"To get started, can you tell me about your "
-            f"{first_gap.replace('_', ' ')}? {schema_desc}."
-        )
-    else:
-        next_question = (
-            "We've already covered a lot of ground together. "
-            "Is there anything you'd like to revisit, clarify, or add before we move on to strategy?"
-        )
+        if has_files and not any(attrs.get(k) for k in _DOC_DERIVED_ATTRS):
+            # Files uploaded but not yet processed
+            greeting = (
+                preamble
+                + "I can see you've already uploaded some documents — I'm still reviewing them. "
+                "While that finishes, have you thought about which programs or schools you're interested in?"
+            )
+        elif gaps:
+            from app.dspy.profile_agent import PROFILE_ATTRIBUTE_SCHEMA
+            first_gap = gaps[0]
+            schema_desc = PROFILE_ATTRIBUTE_SCHEMA.get(first_gap, "").split(".")[0]
+            greeting = (
+                preamble
+                + f"Let's continue with your {first_gap.replace('_', ' ')}. {schema_desc}."
+            )
+        else:
+            greeting = (
+                preamble
+                + "We've already covered a lot of ground together. "
+                "Is there anything you'd like to revisit or clarify before we move on to strategy?"
+            )
+        return greeting, {}
 
-    greeting = preamble + next_question
-
-    if not has_files:
-        greeting += _NO_FILES_NUDGE
-
+    # Fresh start — introduce the process and request documents
+    greeting = (
+        f"Hi{name_part}! I'm your MBA admissions coach.\n\n"
+        "Here's how we'll work together: I'll help you build a complete, honest picture of your "
+        "background and goals, then use that to craft an application strategy that's genuinely yours. "
+        "The process has a few steps:\n\n"
+        "1. You share your CV and a life story document\n"
+        "2. I review them and extract the key information about your profile\n"
+        "3. We fill in any remaining gaps through a focused conversation\n"
+        "4. Together we map out your school list and application approach\n\n"
+        "**To get started, please upload two things:**\n\n"
+        "- **Your CV or résumé** — I'm looking for your career trajectory, the types of roles "
+        "you've held, the scope of your responsibilities, and any patterns that reveal your "
+        "professional identity.\n\n"
+        "- **A life story document** — this can be a personal statement draft, a narrative bio, "
+        "or even just a few paragraphs about what shaped you: your values, turning points, "
+        "key experiences, and why an MBA makes sense for you right now.\n\n"
+        "You can upload them as PDF or Word documents. Take your time — I'll be here when you're ready."
+    )
     return greeting, {}

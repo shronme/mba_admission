@@ -47,6 +47,17 @@ class ChatRepository(BaseRepository):
         await self.session.flush()
         return msg
 
+    async def get_latest_active_thread(self, candidate_id: uuid.UUID) -> ChatThread | None:
+        """Most recent active thread — same selection workers use for file notifications."""
+        result = await self.session.execute(
+            select(ChatThread)
+            .where(ChatThread.candidate_id == candidate_id)
+            .where(ChatThread.status == ChatThreadStatus.ACTIVE)
+            .order_by(ChatThread.created_at.desc())
+            .limit(1),
+        )
+        return result.scalar_one_or_none()
+
     async def list_threads_for_candidate(self, candidate_id: uuid.UUID) -> list[ChatThread]:
         result = await self.session.execute(
             select(ChatThread)

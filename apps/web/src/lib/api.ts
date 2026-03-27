@@ -507,7 +507,7 @@ export type UploadedFileDto = {
   original_filename: string;
   content_type: string | null;
   byte_size: number | null;
-  status: string;
+  status: "uploading" | "reviewing" | "ready" | "failed" | "deleted";
 };
 
 export async function listUploadedFiles(sessionToken?: string | null): Promise<

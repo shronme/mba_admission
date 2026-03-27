@@ -47,6 +47,7 @@ class MessageRole(StrEnum):
 
 class FileStatus(StrEnum):
     UPLOADING = "uploading"
+    REVIEWING = "reviewing"
     READY = "ready"
     FAILED = "failed"
     DELETED = "deleted"

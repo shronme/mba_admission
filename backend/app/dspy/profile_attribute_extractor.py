@@ -25,6 +25,9 @@ class ProfileAttributeExtractorSignature(dspy.Signature):
     Rules:
     - Only extract what is clearly supported by the document text.
     - For each attribute, write a concise, specific value — not generic.
+    - Write every attribute value in clear professional English. If the document
+      is in another language, translate and summarize faithfully; do not paste
+      untranslated source-language paragraphs as the stored value.
     - If a document attribute would IMPROVE on the existing profile value
       (more specific, more accurate, richer detail), include it even if
       that key already exists in the current profile.
@@ -47,7 +50,7 @@ class ProfileAttributeExtractorSignature(dspy.Signature):
 
     attribute_updates_json: str = dspy.OutputField(
         desc=(
-            "Valid JSON object with extracted/updated profile attribute values. "
+            "Valid JSON object with extracted/updated profile attribute values in English. "
             "Keys must be from the attribute schema. Return {} if nothing relevant found."
         )
     )
