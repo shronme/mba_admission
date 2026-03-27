@@ -1,5 +1,7 @@
 "use client";
 
+import { gradProgramFocusLabel } from "@/data/gradProgramFocusOptions";
+
 type ProfileAttributes = Record<string, unknown>;
 
 const CANDIDATE_ATTRIBUTES: Array<{ key: string; label: string; icon: string; description: string }> = [
@@ -144,6 +146,10 @@ type Props = {
     attributes: ProfileAttributes;
     profile_complete: boolean;
     completeness_score: number;
+    country_of_residence?: string | null;
+    date_of_birth?: string | null;
+    intake_form_completed?: boolean;
+    grad_program_focus?: string | null;
   } | null;
 };
 
@@ -156,7 +162,17 @@ export function ProfileView({ profile }: Props) {
     );
   }
 
-  const { headline, summary, attributes, profile_complete, completeness_score } = profile;
+  const {
+    headline,
+    summary,
+    attributes,
+    profile_complete,
+    completeness_score,
+    country_of_residence,
+    date_of_birth,
+    intake_form_completed,
+    grad_program_focus,
+  } = profile;
   const pct = Math.max(0, Math.min(100, completeness_score));
   const barColor =
     pct >= 80 ? "bg-emerald-500" : pct >= 50 ? "bg-amber-400" : "bg-rose-400";
@@ -170,6 +186,37 @@ export function ProfileView({ profile }: Props) {
         )}
         {summary && (
           <p className="mt-1.5 text-sm text-neutral-600 leading-relaxed">{summary}</p>
+        )}
+        {(country_of_residence ||
+          date_of_birth ||
+          grad_program_focus ||
+          intake_form_completed !== undefined) && (
+          <dl className="mt-3 grid gap-1 text-xs text-neutral-600 sm:grid-cols-2">
+            {country_of_residence ? (
+              <>
+                <dt className="font-medium text-neutral-500">Country</dt>
+                <dd>{country_of_residence}</dd>
+              </>
+            ) : null}
+            {grad_program_focus ? (
+              <>
+                <dt className="font-medium text-neutral-500">Target program</dt>
+                <dd>{gradProgramFocusLabel(grad_program_focus)}</dd>
+              </>
+            ) : null}
+            {date_of_birth ? (
+              <>
+                <dt className="font-medium text-neutral-500">Date of birth</dt>
+                <dd>{date_of_birth}</dd>
+              </>
+            ) : null}
+            {intake_form_completed !== undefined ? (
+              <>
+                <dt className="font-medium text-neutral-500">Registration form</dt>
+                <dd>{intake_form_completed ? "Completed" : "Pending"}</dd>
+              </>
+            ) : null}
+          </dl>
         )}
         <div className="mt-4 flex items-center gap-3">
           <div className="flex-1">

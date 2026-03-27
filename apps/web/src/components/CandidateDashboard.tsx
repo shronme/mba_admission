@@ -1,17 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
+import { CandidateIntakeForm } from "@/components/CandidateIntakeForm";
 import { useSession } from "@/context/SessionContext";
+import { fetchCandidateProfile } from "@/lib/api";
 import { ChatView } from "@/features/chat/ChatView";
 import { SidebarDocuments } from "@/components/SidebarDocuments";
 import { StageProgressBar } from "@/components/StageProgressBar";
 
 
 export function CandidateDashboard() {
-  const { session, signOut } = useSession();
+  const { session, setSession, signOut } = useSession();
   const [currentStage, setCurrentStage] = useState(1);
   const [lastUploadedAt, setLastUploadedAt] = useState<number | undefined>();
+  const [intakeSynced, setIntakeSynced] = useState(false);
+  const [needsIntake, setNeedsIntake] = useState(false);
+
+  useEffect(() => {
+    if (!session || session.role !== "candidate" || !session.session_token) {
+      setIntakeSynced(false);
+      return;
+    }
+    const token = session.session_token;
+    const snapshot = session.candidate;
+    let cancelled = false;
+    void fetchCandidateProfile(token)
+      .then((c) => {
+        if (cancelled) return;
+        setSession({
+          role: "candidate",
+          session_token: token,
+          candidate: c,
+        });
+        setNeedsIntake(c.profile?.intake_form_completed !== true);
+        setIntakeSynced(true);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setNeedsIntake(snapshot?.profile?.intake_form_completed !== true);
+          setIntakeSynced(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.role, session?.session_token, setSession]);
 
   if (!session || session.role !== "candidate" || !session.candidate) return null;
 
@@ -21,6 +55,31 @@ export function CandidateDashboard() {
   const handleProfileUpdate = (intakeComplete: boolean) => {
     setCurrentStage(intakeComplete ? 2 : 1);
   };
+
+  if (!intakeSynced || !sessionToken) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 text-sm text-neutral-500">
+        Loading your profile…
+      </div>
+    );
+  }
+
+  if (needsIntake) {
+    return (
+      <CandidateIntakeForm
+        sessionToken={sessionToken}
+        initialFullName={candidate.full_name}
+        onComplete={(c) => {
+          setSession({
+            role: "candidate",
+            session_token: sessionToken,
+            candidate: c,
+          });
+          setNeedsIntake(false);
+        }}
+      />
+    );
+  }
 
   return (
     <div className="dashboard-root">

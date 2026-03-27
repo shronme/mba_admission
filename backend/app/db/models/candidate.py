@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
-from sqlalchemy import Boolean, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, Enum as SQLEnum, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -94,5 +95,11 @@ class CandidateProfile(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     completeness_score: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, insert_default=0
     )
+    country_of_residence: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    intake_form_completed: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, insert_default=False
+    )
+    grad_program_focus: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     candidate: Mapped[Candidate] = relationship(back_populates="profile")

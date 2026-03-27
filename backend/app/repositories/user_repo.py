@@ -66,3 +66,10 @@ class UserRepository(BaseRepository):
         self.session.add(sess)
         await self.session.flush()
         return sess
+
+    async def update_full_name(self, user_id: uuid.UUID, full_name: str) -> None:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return
+        user.full_name = full_name.strip()
+        await self.session.flush()

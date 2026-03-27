@@ -180,6 +180,8 @@ async def create_thread(
         existing_attributes=profile.attributes if profile else None,
         has_files=greeting_file_count > 0,
         profile_complete=greeting_profile_complete,
+        program_type=candidate.program_type,
+        grad_program_focus=profile.grad_program_focus if profile else None,
     )
     await chat_repo.add_message(
         thread.id,

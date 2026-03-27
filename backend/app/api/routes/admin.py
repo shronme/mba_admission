@@ -68,6 +68,10 @@ def _candidate_detail_dto(c: Candidate) -> dict[str, Any]:
             "attributes": p.attributes or {},
             "profile_complete": p.profile_complete,
             "completeness_score": p.completeness_score,
+            "country_of_residence": p.country_of_residence,
+            "date_of_birth": p.date_of_birth.isoformat() if p.date_of_birth else None,
+            "intake_form_completed": p.intake_form_completed,
+            "grad_program_focus": p.grad_program_focus,
         }
     files = [
         _file_to_dto(f)

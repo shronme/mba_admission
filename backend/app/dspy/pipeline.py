@@ -5,6 +5,7 @@ import os
 from typing import Any
 
 from app.core.dspy_runtime import run_dspy_module
+from app.db.enums import ProgramType
 from app.dspy.answer_relevance_classifier import (
     MockAnswerRelevanceClassifier,
     OpenAIAnswerRelevanceClassifier,
@@ -35,6 +36,71 @@ _OFF_TOPIC_KEYWORDS = ("calculus", "photosynthesis", "quantum", "chemistry")
 # Attributes that are populated by CV/document extraction. Their presence signals
 # that at least one document has been fully processed — used for phase detection.
 _DOC_DERIVED_ATTRS = frozenset({"domain_base", "core_identity", "core_strengths", "transferable_assets"})
+
+_DEGREE_TOKENS = {
+    "ms": "MS",
+    "mba": "MBA",
+    "phd": "PhD",
+    "jd": "JD",
+    "md": "MD",
+    "llm": "LLM",
+    "mpp": "MPP",
+    "mpa": "MPA",
+    "mph": "MPH",
+    "msw": "MSW",
+    "mfa": "MFA",
+    "meng": "MEng",
+    "dnp": "DNP",
+    "med": "MEd",
+}
+
+
+def _normalize_program_type(program_type: ProgramType | str | None) -> ProgramType:
+    if program_type is None:
+        return ProgramType.GRAD
+    if isinstance(program_type, ProgramType):
+        return program_type
+    try:
+        return ProgramType(str(program_type).lower())
+    except ValueError:
+        return ProgramType.GRAD
+
+
+def _coach_title(program_type: ProgramType | str | None) -> str:
+    p = _normalize_program_type(program_type)
+    if p == ProgramType.MBA:
+        return "MBA admissions coach"
+    if p == ProgramType.PHD:
+        return "PhD admissions coach"
+    if p == ProgramType.UNDERGRAD:
+        return "undergraduate admissions coach"
+    if p == ProgramType.GRAD:
+        return "graduate admissions coach"
+    return "graduate and professional school admissions coach"
+
+
+def _life_story_degree_clause(program_type: ProgramType | str | None) -> str:
+    p = _normalize_program_type(program_type)
+    if p == ProgramType.MBA:
+        return "why an MBA makes sense for you right now"
+    if p == ProgramType.PHD:
+        return "why this doctoral path makes sense for you right now"
+    if p == ProgramType.UNDERGRAD:
+        return "what you're looking for from your undergraduate path right now"
+    if p == ProgramType.GRAD:
+        return "why this graduate program direction makes sense for you right now"
+    return "why this next academic or professional step makes sense for you right now"
+
+
+def _format_grad_focus_slug(slug: str) -> str:
+    parts = [p for p in slug.strip().split("_") if p]
+    if not parts:
+        return slug
+    out: list[str] = []
+    for part in parts:
+        low = part.lower()
+        out.append(_DEGREE_TOKENS.get(low, part.capitalize()))
+    return " ".join(out)
 
 
 def _compute_intake_phase(file_count: int, attributes: dict[str, Any]) -> str:
@@ -244,6 +310,8 @@ def generate_initial_greeting(
     existing_attributes: dict[str, Any] | None = None,
     has_files: bool = False,
     profile_complete: bool = False,
+    program_type: ProgramType | str | None = None,
+    grad_program_focus: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """
     Generate the opening message when a new thread is created.
@@ -302,8 +370,17 @@ def generate_initial_greeting(
         return greeting, {}
 
     # Fresh start — introduce the process and request documents
+    coach = _coach_title(program_type)
+    degree_clause = _life_story_degree_clause(program_type)
+    focus_line = ""
+    if grad_program_focus and grad_program_focus.strip():
+        focus_line = (
+            f"From your intake, you're focused on **{_format_grad_focus_slug(grad_program_focus.strip())}** "
+            "— we'll keep that front and center.\n\n"
+        )
     greeting = (
-        f"Hi{name_part}! I'm your MBA admissions coach.\n\n"
+        f"Hi{name_part}! I'm your {coach}.\n\n"
+        f"{focus_line}"
         "Here's how we'll work together: I'll help you build a complete, honest picture of your "
         "background and goals, then use that to craft an application strategy that's genuinely yours. "
         "The process has a few steps:\n\n"
@@ -317,7 +394,7 @@ def generate_initial_greeting(
         "professional identity.\n\n"
         "- **A life story document** — this can be a personal statement draft, a narrative bio, "
         "or even just a few paragraphs about what shaped you: your values, turning points, "
-        "key experiences, and why an MBA makes sense for you right now.\n\n"
+        f"key experiences, and {degree_clause}.\n\n"
         "You can upload them as PDF or Word documents. Take your time — I'll be here when you're ready."
     )
     return greeting, {}

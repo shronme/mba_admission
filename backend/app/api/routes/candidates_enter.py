@@ -17,12 +17,14 @@ from sqlalchemy.orm import selectinload
 from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
 from app.db.enums import UserRole
-from app.db.models.candidate import Candidate
+from app.db.models.candidate import Candidate, CandidateProfile
+from app.constants.grad_program_focus import GRAD_PROGRAM_FOCUS_TO_TYPE
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.candidates import (
     CandidateEnterRequest,
     CandidateEnterResponse,
+    CandidateIntakeUpdate,
     CandidateOut,
     CandidateProfileOut,
 )
@@ -124,4 +126,45 @@ async def get_me(
     candidate = result.scalar_one_or_none()
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
+    return _candidate_to_out(candidate)
+
+
+@router.patch("/me/intake", response_model=CandidateOut)
+async def patch_me_intake(
+    body: CandidateIntakeUpdate,
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> CandidateOut:
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(Candidate)
+        .options(
+            selectinload(Candidate.profile),
+            selectinload(Candidate.user),
+        )
+        .where(Candidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    user_repo = UserRepository(session)
+    await user_repo.update_full_name(candidate.user_id, body.full_name)
+    candidate.program_type = GRAD_PROGRAM_FOCUS_TO_TYPE[body.grad_program_focus]
+
+    profile = candidate.profile
+    if profile is None:
+        profile = CandidateProfile(candidate_id=candidate.id)
+        session.add(profile)
+        candidate.profile = profile
+
+    profile.country_of_residence = body.country_of_residence.strip()
+    profile.date_of_birth = body.date_of_birth
+    profile.grad_program_focus = body.grad_program_focus
+    profile.intake_form_completed = True
+
+    await session.commit()
+    await session.refresh(candidate, ["profile", "user"])
+    logger.info("candidate_intake_completed candidate_id=%s", candidate_id)
     return _candidate_to_out(candidate)

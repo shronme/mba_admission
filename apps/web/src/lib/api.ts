@@ -10,6 +10,10 @@ export type CandidateProfileDto = {
   attributes: Record<string, unknown> | null;
   profile_complete: boolean;
   completeness_score: number;
+  country_of_residence: string | null;
+  date_of_birth: string | null;
+  intake_form_completed: boolean;
+  grad_program_focus: string | null;
 };
 
 export type CandidateDto = {
@@ -81,9 +85,48 @@ export type AdminCandidateDetail = {
     attributes: Record<string, unknown>;
     profile_complete: boolean;
     completeness_score: number;
+    country_of_residence?: string | null;
+    date_of_birth?: string | null;
+    intake_form_completed?: boolean;
+    grad_program_focus?: string | null;
   } | null;
   files: AdminFileDto[];
 };
+
+export type CandidateIntakePayload = {
+  full_name: string;
+  country_of_residence: string;
+  date_of_birth: string;
+  grad_program_focus: string;
+};
+
+function parseCandidateProfile(raw: unknown): CandidateProfileDto | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const p = raw as Record<string, unknown>;
+  return {
+    headline: (p.headline as string | null) ?? null,
+    summary: (p.summary as string | null) ?? null,
+    attributes: (p.attributes as Record<string, unknown> | null) ?? null,
+    profile_complete: Boolean(p.profile_complete),
+    completeness_score: typeof p.completeness_score === "number" ? p.completeness_score : 0,
+    country_of_residence: (p.country_of_residence as string | null) ?? null,
+    date_of_birth: (p.date_of_birth as string | null) ?? null,
+    intake_form_completed: p.intake_form_completed === true,
+    grad_program_focus: (p.grad_program_focus as string | null) ?? null,
+  };
+}
+
+function parseCandidateDto(cand: Record<string, unknown>): CandidateDto {
+  return {
+    id: String(cand.id ?? ""),
+    email: (cand.email as string | null) ?? null,
+    full_name: String(cand.full_name ?? ""),
+    program_type: String(cand.program_type ?? ""),
+    status: String(cand.status ?? ""),
+    stage: cand.stage !== undefined ? String(cand.stage) : undefined,
+    profile: parseCandidateProfile(cand.profile),
+  };
+}
 
 /** POST /auth/enter — unified login */
 export async function authEnter(body: {
@@ -117,7 +160,15 @@ export async function authEnter(body: {
       `POST /auth/enter failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
     );
   }
-  return data as AuthEnterResponse;
+  const raw = data as Record<string, unknown>;
+  const base = raw as unknown as AuthEnterResponse;
+  if (raw.candidate && typeof raw.candidate === "object") {
+    return {
+      ...base,
+      candidate: parseCandidateDto(raw.candidate as Record<string, unknown>),
+    };
+  }
+  return base;
 }
 
 /** Admin API helpers */
@@ -222,17 +273,7 @@ export async function enterWithEmail(body: {
   return {
     created,
     session_token: sessionToken,
-    candidate: {
-      id: cand.id,
-      email: (cand.email as string | null) ?? null,
-      full_name: String(cand.full_name ?? ""),
-      program_type: String(cand.program_type ?? ""),
-      status: String(cand.status ?? ""),
-      profile:
-        cand.profile !== null && typeof cand.profile === "object"
-          ? (cand.profile as CandidateProfileDto)
-          : null,
-    },
+    candidate: parseCandidateDto(cand),
   };
 }
 
@@ -255,18 +296,42 @@ export async function fetchCandidateProfile(
   }
   if (!res.ok)
     throw new Error(`GET /candidates/me failed: ${res.status} ${text}`);
-  const cand = data as Record<string, unknown>;
-  return {
-    id: String(cand.id ?? ""),
-    email: (cand.email as string | null) ?? null,
-    full_name: String(cand.full_name ?? ""),
-    program_type: String(cand.program_type ?? ""),
-    status: String(cand.status ?? ""),
-    profile:
-      cand.profile !== null && typeof cand.profile === "object"
-        ? (cand.profile as CandidateProfileDto)
-        : null,
-  };
+  return parseCandidateDto(data as Record<string, unknown>);
+}
+
+export async function patchCandidateIntake(
+  sessionToken: string,
+  body: CandidateIntakePayload,
+): Promise<CandidateDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/intake`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      full_name: body.full_name.trim(),
+      country_of_residence: body.country_of_residence.trim(),
+      date_of_birth: body.date_of_birth,
+      grad_program_focus: body.grad_program_focus,
+    }),
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`PATCH /candidates/me/intake: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(
+      `PATCH /candidates/me/intake failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
+    );
+  }
+  return parseCandidateDto(data as Record<string, unknown>);
 }
 
 export function getApiBaseUrl(): string | null {
