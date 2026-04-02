@@ -287,6 +287,15 @@ def run_profile_agent(
 
     min_score = max(0, min(100, min_score))
 
+    def _has_content(value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) > 0
+        return True
+
     # Strip internal reserved keys (e.g. _completeness_score) before sending to
     # the LLM so they don't pollute the completeness assessment.
     clean_attrs = {k: v for k, v in (attributes or {}).items() if not k.startswith("_")}
@@ -299,16 +308,22 @@ def run_profile_agent(
         current_completeness_score=str(min_score),
     )
 
+    structural_gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if not _has_content(clean_attrs.get(k))]
+    structural_max_score = min(
+        100,
+        round((len(CANDIDATE_INPUT_ATTRIBUTES) - len(structural_gaps)) / len(CANDIDATE_INPUT_ATTRIBUTES) * 100),
+    )
+
     raw_complete = str(getattr(pred, "is_complete", "false")).strip().lower()
     is_complete = raw_complete == "true"
 
     try:
         score = int(str(getattr(pred, "completeness_score", "0")).strip())
-        score = max(min_score, min(100, score))
+        score = min(structural_max_score, min(100, score))
+        score = max(min_score, score) if min_score <= structural_max_score else structural_max_score
     except (ValueError, TypeError):
         # Fallback: proportion of filled candidate-input attributes.
-        filled = sum(1 for k in CANDIDATE_INPUT_ATTRIBUTES if (attributes or {}).get(k))
-        score = max(min_score, min(100, round(filled / len(CANDIDATE_INPUT_ATTRIBUTES) * 100)))
+        score = max(min_score, structural_max_score) if min_score <= structural_max_score else structural_max_score
 
     try:
         gaps: list[str] = json.loads(getattr(pred, "gaps_json", "[]") or "[]")
@@ -317,7 +332,9 @@ def run_profile_agent(
     except (json.JSONDecodeError, ValueError):
         gaps = get_profile_gaps(attributes)
 
-    # Make "complete" deterministic: gaps are the source of truth.
+    gaps = sorted(set(structural_gaps).union(gaps))
+
+    # Make "complete" deterministic: required-attribute presence + gaps are the source of truth.
     # Some model outputs can mistakenly report score=100 with is_complete=false;
     # the UI and routing depend on a consistent boolean.
     if not gaps:
