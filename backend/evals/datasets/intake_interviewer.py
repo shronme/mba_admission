@@ -171,10 +171,10 @@ EXAMPLES: list[dspy.Example] = [
         answer_classification="relevant",
         expected_profile_keys=frozenset({"core_strengths"}),
     ),
-    # --------------------------------------------------------- Turn: risks
+    # --------------------------------------------------------- Turn: core_tension (honest application gaps)
     _example(
         candidate_name="Tom Wright",
-        last_question_asked="What weaknesses or risks do you see in your application?",
+        last_question_asked="Where do you see the biggest tension or credibility gap in your application?",
         current_profile_json=json.dumps(
             {
                 "core_identity": "Non-profit director.",
@@ -187,7 +187,7 @@ EXAMPLES: list[dspy.Example] = [
             [k for k in CANDIDATE_INPUT_ATTRIBUTES if k not in {"core_identity", "domain_base", "core_strengths", "motivation"}]
         ),
         conversation_history=(
-            "INTERVIEWER: What weaknesses or risks do you see in your application?\n"
+            "INTERVIEWER: Where do you see the biggest tension or credibility gap in your application?\n"
         ),
         user_message=(
             "My low GPA from undergrad is a concern — I had a 2.9 due to personal circumstances "
@@ -196,7 +196,7 @@ EXAMPLES: list[dspy.Example] = [
         ),
         has_files="true",
         answer_classification="relevant",
-        expected_profile_keys=frozenset({"risks"}),
+        expected_profile_keys=frozenset({"core_tension"}),
     ),
     # --------------------------------------------------------- Turn: transferable_assets
     _example(
