@@ -27,9 +27,7 @@ from sqlalchemy import select
 
 from app.core.celery_app import celery_app
 from app.core.sync_db import sync_session_scope
-from app.db.enums import ChatThreadStatus, MessageRole
 from app.db.models.candidate import CandidateProfile
-from app.db.models.chat import ChatMessage, ChatThread
 from app.db.models.files import UploadedFile
 from app.db.enums import FileStatus
 
@@ -48,46 +46,13 @@ def _mark_file_ready(file_uuid: uuid.UUID) -> None:
             row.status = FileStatus.READY
 
 
-def _get_active_thread(candidate_id: uuid.UUID) -> ChatThread | None:
-    """Return the most recent active chat thread for the candidate, or None."""
-    with sync_session_scope() as session:
-        result = session.execute(
-            select(ChatThread)
-            .where(ChatThread.candidate_id == candidate_id)
-            .where(ChatThread.status == ChatThreadStatus.ACTIVE)
-            .order_by(ChatThread.created_at.desc())
-            .limit(1)
-        )
-        return result.scalar_one_or_none()
-
-
 def _post_chat_message(candidate_id: uuid.UUID, content: str, extra: dict | None = None) -> None:
-    """Post an assistant chat message to the candidate's active thread."""
-    with sync_session_scope() as session:
-        result = session.execute(
-            select(ChatThread)
-            .where(ChatThread.candidate_id == candidate_id)
-            .where(ChatThread.status == ChatThreadStatus.ACTIVE)
-            .order_by(ChatThread.created_at.desc())
-            .limit(1)
-        )
-        thread = result.scalar_one_or_none()
-        if thread is None:
-            logger.info(
-                "profile_update no_active_thread candidate_id=%s — skipping notification",
-                candidate_id,
-            )
-            return
-        session.add(
-            ChatMessage(
-                thread_id=thread.id,
-                role=MessageRole.ASSISTANT,
-                content=content,
-                extra=extra or {},
-            )
-        )
+    # Chat is deprecated/disabled. Keep as a no-op so task flow remains stable.
     logger.info(
-        "profile_update notification_posted candidate_id=%s", candidate_id
+        "profile_update chat_message_skipped candidate_id=%s chars=%s extra_keys=%s",
+        candidate_id,
+        len(content or ""),
+        list((extra or {}).keys()),
     )
 
 
@@ -250,6 +215,32 @@ def update_profile_from_document(self, file_id: str) -> dict:
     )
 
     merged_attributes = {**current_attributes, **attribute_updates}
+
+    # If doc extraction didn't yield a usable core_identity, run a focused, full-context
+    # synthesis pass. This is especially important for CVs where "identity" is implicit
+    # (roles/scope/impact) and can be missed by broad multi-attribute extraction.
+    if not (merged_attributes.get("core_identity") or "").strip():
+        try:
+            from app.dspy.profile_attribute_synthesizer import run_single_attribute_synthesizer
+
+            synthesized_core_identity = run_single_attribute_synthesizer(
+                document_text=extracted_text,
+                document_type=doc_type_value,
+                current_attributes=merged_attributes,
+                target_attribute_key="core_identity",
+                use_openai=use_openai,
+            )
+            if synthesized_core_identity.strip():
+                merged_attributes = {**merged_attributes, "core_identity": synthesized_core_identity.strip()}
+                # Make sure the summary message reflects that we captured core_identity.
+                if "core_identity" not in attribute_updates:
+                    attribute_updates = {**attribute_updates, "core_identity": synthesized_core_identity.strip()}
+        except Exception:
+            logger.exception(
+                "profile_update core_identity_synthesis_failed candidate_id=%s file_id=%s",
+                candidate_id,
+                file_id,
+            )
 
     if attribute_updates and use_openai:
         from app.dspy.profile_language_normalize import run_profile_attributes_english_normalize

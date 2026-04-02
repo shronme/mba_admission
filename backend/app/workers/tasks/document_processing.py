@@ -22,8 +22,7 @@ import zipfile
 
 from app.core.celery_app import celery_app
 from app.core.sync_db import sync_session_scope
-from app.db.enums import DocumentType, FileStatus, MessageRole, ChatThreadStatus
-from app.db.models.chat import ChatMessage, ChatThread
+from app.db.enums import DocumentType, FileStatus
 from app.db.models.files import UploadedFile
 
 logger = logging.getLogger(__name__)
@@ -304,54 +303,15 @@ def _embed_and_store(
     )
 
 
-# ---------------------------------------------------------------------------
-# Chat notification
-# ---------------------------------------------------------------------------
-
-def _post_chat_notification(
-    *,
-    candidate_id: uuid.UUID,
-    filename: str,
-    doc_type: DocumentType,
-) -> None:
-    from sqlalchemy import select
-
+def _post_chat_notification(*, candidate_id: uuid.UUID, filename: str, doc_type: DocumentType) -> None:
+    # Chat is deprecated/disabled. Keep as a no-op so older task code paths remain safe.
     label = _TYPE_LABELS.get(doc_type, "document")
-    content = (
-        f"I've received your document **{filename}**. "
-        f"It looks like a {label} — I'm reviewing it now and will use it "
-        "to help guide your application."
-    )
-
-    with sync_session_scope() as session:
-        result = session.execute(
-            select(ChatThread)
-            .where(ChatThread.candidate_id == candidate_id)
-            .where(ChatThread.status == ChatThreadStatus.ACTIVE)
-            .order_by(ChatThread.created_at.desc())
-            .limit(1)
-        )
-        thread = result.scalar_one_or_none()
-        if thread is None:
-            logger.info(
-                "doc_processing no_active_thread candidate_id=%s — skipping notification",
-                candidate_id,
-            )
-            return
-
-        session.add(
-            ChatMessage(
-                thread_id=thread.id,
-                role=MessageRole.ASSISTANT,
-                content=content,
-                extra={"type": "file_notification"},
-            )
-        )
-
     logger.info(
-        "doc_processing notification_posted candidate_id=%s thread_id=%s",
+        "doc_processing chat_notification_skipped candidate_id=%s filename=%s doc_type=%s label=%s",
         candidate_id,
-        thread.id,
+        filename,
+        getattr(doc_type, "value", str(doc_type)),
+        label,
     )
 
 
@@ -382,6 +342,7 @@ def process_uploaded_document(self, file_id: str) -> dict:
         original_filename: str = file_row.original_filename
         content_type: str | None = file_row.content_type
         storage_uri: str = file_row.storage_uri
+        preset_doc_type: DocumentType | None = file_row.document_type
 
     try:
         # --- 2. Fetch raw bytes from storage ---
@@ -407,8 +368,10 @@ def process_uploaded_document(self, file_id: str) -> dict:
             len(chunks) if chunks else 0,
         )
 
-        # --- 4. Classify ---
-        if extracted_text:
+        # --- 4. Classify (trust intake hint for CV / life story when preset on the row) ---
+        if preset_doc_type in (DocumentType.CV, DocumentType.LIFE_STORY):
+            doc_type = preset_doc_type
+        elif extracted_text:
             doc_type = _classify_document(extracted_text)
         else:
             doc_type = DocumentType.UNCLASSIFIED

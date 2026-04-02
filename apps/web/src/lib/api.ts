@@ -98,7 +98,69 @@ export type CandidateIntakePayload = {
   country_of_residence: string;
   date_of_birth: string;
   grad_program_focus: string;
+  /** Canonical school names from the intake list (currently US business programs). */
+  target_schools: string[];
 };
+
+export type ProfileGapQuestionDto = {
+  key: string;
+  question: string;
+};
+
+export type ProfileReviewResponseDto = {
+  profile_complete: boolean;
+  completeness_score: number;
+  missing: ProfileGapQuestionDto[];
+};
+
+// Client-side request coalescing to prevent "request storms" when multiple
+// components poll the same GET endpoints concurrently (or React dev mode remounts).
+const _inflight = new Map<string, Promise<unknown>>();
+const _cache = new Map<string, { at: number; value: unknown }>();
+const _lastStart = new Map<string, number>();
+
+function inflightKey(parts: Array<string | null | undefined>) {
+  return parts.filter(Boolean).join("|");
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+function coalesce<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = _inflight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = fn().finally(() => {
+    _inflight.delete(key);
+  });
+  _inflight.set(key, p as Promise<unknown>);
+  return p;
+}
+
+function cached<T>(key: string, ttlMs: number): T | null {
+  const hit = _cache.get(key);
+  if (!hit) return null;
+  if (nowMs() - hit.at > ttlMs) return null;
+  return hit.value as T;
+}
+
+function setCached(key: string, value: unknown) {
+  _cache.set(key, { at: nowMs(), value });
+}
+
+function rateLimitKey(parts: Array<string | null | undefined>) {
+  return `rl|${inflightKey(parts)}`;
+}
+
+function enforceMinInterval(key: string, minMs: number): boolean {
+  const last = _lastStart.get(key) ?? 0;
+  const t = nowMs();
+  if (t - last < minMs) return false;
+  _lastStart.set(key, t);
+  return true;
+}
 
 function parseCandidateProfile(raw: unknown): CandidateProfileDto | null {
   if (raw === null || typeof raw !== "object") return null;
@@ -282,21 +344,36 @@ export async function fetchCandidateProfile(
 ): Promise<CandidateDto> {
   const root = getApiBaseUrl();
   if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
-  const res = await fetch(`${root}/candidates/me`, {
-    method: "GET",
-    cache: "no-store",
-    headers: { Authorization: `Bearer ${sessionToken}` },
-  });
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`GET /candidates/me: invalid JSON (${res.status})`);
+  const url = `${root}/candidates/me`;
+  const key = inflightKey(["GET", url, sessionToken]);
+  const cachedValue = cached<CandidateDto>(key, 1000);
+  if (cachedValue) return cachedValue;
+  const rlKey = rateLimitKey(["GET", url, sessionToken]);
+  if (!enforceMinInterval(rlKey, 1000)) {
+    const maybeCached = cached<CandidateDto>(key, 10_000);
+    if (maybeCached) return maybeCached;
   }
-  if (!res.ok)
-    throw new Error(`GET /candidates/me failed: ${res.status} ${text}`);
-  return parseCandidateDto(data as Record<string, unknown>);
+  return coalesce(
+    key,
+    async () => {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      const text = await res.text();
+      let data: unknown;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`GET /candidates/me: invalid JSON (${res.status})`);
+      }
+      if (!res.ok) throw new Error(`GET /candidates/me failed: ${res.status} ${text}`);
+      const parsed = parseCandidateDto(data as Record<string, unknown>);
+      setCached(key, parsed);
+      return parsed;
+    },
+  );
 }
 
 export async function patchCandidateIntake(
@@ -317,6 +394,7 @@ export async function patchCandidateIntake(
       country_of_residence: body.country_of_residence.trim(),
       date_of_birth: body.date_of_birth,
       grad_program_focus: body.grad_program_focus,
+      target_schools: body.target_schools,
     }),
   });
   const text = await res.text();
@@ -334,15 +412,204 @@ export async function patchCandidateIntake(
   return parseCandidateDto(data as Record<string, unknown>);
 }
 
+/**
+ * Draft-save intake answers without completing the intake.
+ * (Persists Step 1 answers but does not set `intake_form_completed`.)
+ */
+export async function patchCandidateIntakeDraft(
+  sessionToken: string,
+  body: CandidateIntakePayload,
+): Promise<CandidateDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/intake/draft`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      full_name: body.full_name.trim(),
+      country_of_residence: body.country_of_residence.trim(),
+      date_of_birth: body.date_of_birth,
+      grad_program_focus: body.grad_program_focus,
+      target_schools: body.target_schools,
+    }),
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`PATCH /candidates/me/intake/draft: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`PATCH /candidates/me/intake/draft failed: ${res.status} ${text}`);
+  }
+  return parseCandidateDto(data as Record<string, unknown>);
+}
+
+/** Persist intake step completion in profile.attributes. */
+export async function patchCandidateIntakeStep(
+  sessionToken: string,
+  intakeStepCompleted: 0 | 1 | 2 | 3 | 4,
+): Promise<CandidateDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/intake/step`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ intake_step_completed: intakeStepCompleted }),
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`PATCH /candidates/me/intake/step: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`PATCH /candidates/me/intake/step failed: ${res.status} ${text}`);
+  }
+  return parseCandidateDto(data as Record<string, unknown>);
+}
+
+export async function reviewCandidateProfile(sessionToken: string): Promise<ProfileReviewResponseDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const url = `${root}/candidates/me/profile/review`;
+  return coalesce(
+    inflightKey(["GET", url, sessionToken]),
+    async () => {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${sessionToken}` },
+      });
+      const text = await res.text();
+      let data: unknown;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`GET /candidates/me/profile/review: invalid JSON (${res.status})`);
+      }
+      if (!res.ok) {
+        throw new Error(`GET /candidates/me/profile/review failed: ${res.status} ${text}`);
+      }
+      const obj = data as Partial<ProfileReviewResponseDto> & Record<string, unknown>;
+      return {
+        profile_complete: Boolean(obj.profile_complete),
+        completeness_score: typeof obj.completeness_score === "number" ? obj.completeness_score : 0,
+        missing: Array.isArray(obj.missing)
+          ? obj.missing.map((x) => ({
+              key: String((x as any)?.key ?? ""),
+              question: String((x as any)?.question ?? ""),
+            }))
+          : [],
+      };
+    },
+  );
+}
+
+export async function submitCandidateProfileAnswers(
+  sessionToken: string,
+  answers: Record<string, string>,
+): Promise<ProfileReviewResponseDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/profile/answers`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ answers }),
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`PATCH /candidates/me/profile/answers: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`PATCH /candidates/me/profile/answers failed: ${res.status} ${text}`);
+  }
+  const obj = data as Partial<ProfileReviewResponseDto> & Record<string, unknown>;
+  return {
+    profile_complete: Boolean(obj.profile_complete),
+    completeness_score: typeof obj.completeness_score === "number" ? obj.completeness_score : 0,
+    missing: Array.isArray(obj.missing)
+      ? obj.missing.map((x) => ({
+          key: String((x as any)?.key ?? ""),
+          question: String((x as any)?.question ?? ""),
+        }))
+      : [],
+  };
+}
+
+/** GET /candidates/intake/target-schools — curated lists for the intake form (authoritative). */
+export type IntakeTargetSchoolsResponse = {
+  tier_1: string[];
+  tier_2: string[];
+  max_selections: number;
+};
+
+function parseIntakeTargetSchoolsPayload(data: unknown): IntakeTargetSchoolsResponse {
+  if (data === null || typeof data !== "object") {
+    throw new Error("Invalid target schools payload");
+  }
+  const o = data as Record<string, unknown>;
+  if (!Array.isArray(o.tier_1) || !Array.isArray(o.tier_2) || typeof o.max_selections !== "number") {
+    throw new Error("Invalid target schools payload shape");
+  }
+  return {
+    tier_1: o.tier_1.map((x) => String(x)),
+    tier_2: o.tier_2.map((x) => String(x)),
+    max_selections: o.max_selections,
+  };
+}
+
+export async function fetchIntakeTargetSchools(
+  sessionToken: string,
+): Promise<IntakeTargetSchoolsResponse> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/intake/target-schools`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GET /candidates/intake/target-schools: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(`GET /candidates/intake/target-schools failed: ${res.status} ${text}`);
+  }
+  return parseIntakeTargetSchoolsPayload(data);
+}
+
 export function getApiBaseUrl(): string | null {
   const raw = process.env.NEXT_PUBLIC_API_URL;
   if (!raw) return null;
+  // Always use same-origin proxy to avoid CORS preflights (OPTIONS storms) from the browser.
+  // `next.config.mjs` rewrites `/api/*` to the configured FastAPI host.
+  if (typeof window !== "undefined") return "/api";
+
+  // Server-side fallback (should be rare since most calls happen in client components).
   let base = raw.trim().replace(/\/$/, "");
   if (!base) return null;
-  // Avoid invalid relative fetches if someone omits the scheme (Railway vars often pasted host-only).
-  if (!/^https?:\/\//i.test(base)) {
-    base = `https://${base}`;
-  }
+  if (!/^https?:\/\//i.test(base)) base = `https://${base}`;
   return base;
 }
 
@@ -353,18 +620,21 @@ export async function fetchHealth(): Promise<unknown> {
       "NEXT_PUBLIC_API_URL is not set. Copy apps/web/.env.example to apps/web/.env.local",
     );
   }
-  const res = await fetch(`${root}/health`, {
-    method: "GET",
-    cache: "no-store",
+  const url = `${root}/health`;
+  return coalesce(inflightKey(["GET", url]), async () => {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const hint404 =
+        res.status === 404
+          ? " (404 usually means NEXT_PUBLIC_API_URL points at the **frontend** host, not the **FastAPI** host — use the API service’s Railway domain.)"
+          : "";
+      throw new Error(`GET /health failed: ${res.status}${hint404}`);
+    }
+    return res.json();
   });
-  if (!res.ok) {
-    const hint404 =
-      res.status === 404
-        ? " (404 usually means NEXT_PUBLIC_API_URL points at the **frontend** host, not the **FastAPI** host — use the API service’s Railway domain.)"
-        : "";
-    throw new Error(`GET /health failed: ${res.status}${hint404}`);
-  }
-  return res.json();
 }
 
 export async function enqueueWiringSmoke(): Promise<{ job_id: string }> {
@@ -573,6 +843,8 @@ export type UploadedFileDto = {
   content_type: string | null;
   byte_size: number | null;
   status: "uploading" | "reviewing" | "ready" | "failed" | "deleted";
+  document_type?: "cv" | "life_story" | string | null;
+  uploaded_stage?: number | null;
 };
 
 export async function listUploadedFiles(sessionToken?: string | null): Promise<
@@ -581,24 +853,82 @@ export async function listUploadedFiles(sessionToken?: string | null): Promise<
   const root = getApiBaseUrl();
   if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
 
-  const res = await fetch(`${root}/files`, {
-    method: "GET",
+  const url = `${root}/files`;
+  return coalesce(
+    inflightKey(["GET", url, sessionToken ?? "anon"]),
+    async () => {
+      const res = await fetch(url, {
+        method: "GET",
+        cache: "no-store",
+        headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined,
+      });
+      const text = await res.text();
+      let data: unknown;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new Error(`GET /files: invalid JSON (${res.status})`);
+      }
+      if (!res.ok) {
+        throw new Error(`GET /files failed: ${res.status} ${text}`);
+      }
+      if (
+        typeof window !== "undefined" &&
+        (process.env.NEXT_PUBLIC_DEBUG_INTAKE === "1" || process.env.NODE_ENV !== "production")
+      ) {
+        // eslint-disable-next-line no-console
+        console.debug("[intake] GET /files raw", data);
+      }
+
+      // Allow either `{files:[...]}` or `[...]` shapes.
+      if (Array.isArray(data)) return data as UploadedFileDto[];
+      if (typeof data === "object" && data !== null) {
+        const obj = data as Record<string, unknown>;
+        if (Array.isArray(obj.files)) return obj.files as UploadedFileDto[];
+      }
+      return [];
+    },
+  );
+}
+
+/**
+ * Upload a single file with an optional document-type hint (intake CV / life story).
+ * The API accepts `document_type_hint` only when exactly one file is sent.
+ */
+export async function uploadFileWithDocumentHint(
+  sessionToken: string,
+  file: File,
+  documentType: "cv" | "life_story",
+  uploadedStage?: number | null,
+): Promise<UploadedFileDto[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+
+  const form = new FormData();
+  form.append("files", file);
+  form.append("document_type_hint", documentType);
+  if (typeof uploadedStage === "number" && Number.isFinite(uploadedStage)) {
+    form.append("uploaded_stage", String(uploadedStage));
+  }
+
+  const res = await fetch(`${root}/files/upload`, {
+    method: "POST",
+    body: form,
+    headers: { Authorization: `Bearer ${sessionToken}` },
     cache: "no-store",
-    headers: sessionToken ? { Authorization: `Bearer ${sessionToken}` } : undefined,
   });
+
   const text = await res.text();
   let data: unknown;
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    throw new Error(`GET /files: invalid JSON (${res.status})`);
+    throw new Error(`POST /files/upload: invalid JSON (${res.status})`);
   }
   if (!res.ok) {
-    throw new Error(`GET /files failed: ${res.status} ${text}`);
+    throw new Error(`POST /files/upload failed: ${res.status} ${text}`);
   }
 
-  // Allow either `{files:[...]}` or `[...]` shapes.
-  if (Array.isArray(data)) return data as UploadedFileDto[];
   if (typeof data === "object" && data !== null) {
     const obj = data as Record<string, unknown>;
     if (Array.isArray(obj.files)) return obj.files as UploadedFileDto[];
@@ -609,6 +939,7 @@ export async function listUploadedFiles(sessionToken?: string | null): Promise<
 export async function uploadFiles(
   files: FileList,
   sessionToken?: string | null,
+  uploadedStage?: number | null,
 ): Promise<UploadedFileDto[]> {
   const root = getApiBaseUrl();
   if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
@@ -616,6 +947,9 @@ export async function uploadFiles(
   const form = new FormData();
   for (const file of Array.from(files)) {
     form.append("files", file);
+  }
+  if (typeof uploadedStage === "number" && Number.isFinite(uploadedStage)) {
+    form.append("uploaded_stage", String(uploadedStage));
   }
 
   const res = await fetch(`${root}/files/upload`, {
@@ -643,75 +977,5 @@ export async function uploadFiles(
     if (Array.isArray(obj.uploaded_files))
       return obj.uploaded_files as UploadedFileDto[];
   }
-  return [];
-}
-
-/** Chat */
-export type ChatThreadDto = { id: string };
-
-export type ChatMessageDto = {
-  id: string;
-  role: string;
-  content: string;
-  created_at?: string;
-};
-
-export async function createChatThread(
-  sessionToken?: string | null,
-): Promise<ChatThreadDto> {
-  const root = getApiBaseUrl();
-  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
-
-  const res = await fetch(`${root}/chat/threads`, {
-    method: "POST",
-    cache: "no-store",
-    headers: sessionToken
-      ? { Authorization: `Bearer ${sessionToken}` }
-      : undefined,
-  });
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`POST /chat/threads: invalid JSON (${res.status})`);
-  }
-  if (!res.ok) throw new Error(`POST /chat/threads failed: ${res.status} ${text}`);
-
-  const obj = data as Record<string, unknown>;
-  const id =
-    (typeof obj.thread_id === "string" && obj.thread_id) ||
-    (typeof obj.id === "string" && obj.id) ||
-    null;
-  if (!id) throw new Error(`POST /chat/threads: missing thread id`);
-  return { id };
-}
-
-export async function fetchChatMessages(
-  threadId: string,
-  sessionToken?: string | null,
-): Promise<ChatMessageDto[]> {
-  const root = getApiBaseUrl();
-  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
-
-  const res = await fetch(`${root}/chat/threads/${encodeURIComponent(threadId)}/messages`, {
-    method: "GET",
-    cache: "no-store",
-    headers: sessionToken
-      ? { Authorization: `Bearer ${sessionToken}` }
-      : undefined,
-  });
-  const text = await res.text();
-  let data: unknown;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    throw new Error(`GET /chat/threads/{id}/messages: invalid JSON (${res.status})`);
-  }
-  if (!res.ok) throw new Error(`GET messages failed: ${res.status} ${text}`);
-
-  if (Array.isArray(data)) return data as ChatMessageDto[];
-  const obj = data as Record<string, unknown>;
-  if (Array.isArray(obj.messages)) return obj.messages as ChatMessageDto[];
   return [];
 }

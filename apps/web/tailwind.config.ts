@@ -1,4 +1,11 @@
 import type { Config } from "tailwindcss";
+import {
+  stitchAccent,
+  stitchAmbientShadow,
+  stitchBrand,
+  stitchSemantic,
+  stitchSurface,
+} from "./src/design/stitch-theme";
 
 const config: Config = {
   content: [
@@ -9,20 +16,20 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        serif: ["var(--font-noto-serif)", "Noto Serif", "Georgia", "serif"],
+      },
+      boxShadow: {
+        ambient: stitchAmbientShadow(),
+      },
       colors: {
-        forest: {
-          50: "#f0faf4",
-          100: "#d4eddf",
-          200: "#a9dcbf",
-          300: "#6ec49a",
-          400: "#3dab7a",
-          500: "#1e8c5e",
-          600: "#17724c",
-          700: "#115a3c",
-          800: "#0b422b",
-          900: "#062b1b",
+        brand: { ...stitchBrand },
+        surface: { ...stitchSurface },
+        accent: { ...stitchAccent },
+        on: {
+          surface: stitchSemantic.on_surface,
         },
-        // kept for any legacy references
         cream: {
           50: "#fdf8f0",
           100: "#f5ecd8",
@@ -41,12 +48,17 @@ const config: Config = {
       },
     },
   },
+  // Base utilities must be safelisted: @apply in globals.css is not scanned as class strings.
+  // Do not attach `variants` here only — that skips the unprefixed utilities @apply needs.
   safelist: [
     {
-      // Ensure forest color utilities are generated even when only referenced
-      // via @apply in globals.css (not scanned as content files by Tailwind JIT).
-      pattern: /^(bg|text|border|ring|fill|stroke)-forest-\d+$/,
-      variants: ["hover", "focus", "active", "disabled"],
+      pattern:
+        /^(bg|text|border|ring|fill|stroke)-(brand-\d+|accent(-muted)?|surface(-[a-z]+)?|on-surface)$/,
+    },
+    {
+      pattern:
+        /^(bg|text|border|ring|fill|stroke)-(brand-\d+|accent(-muted)?|surface(-[a-z]+)?|on-surface)$/,
+      variants: ["hover", "focus", "active", "disabled", "file"],
     },
   ],
   plugins: [],

@@ -317,6 +317,15 @@ def run_profile_agent(
     except (json.JSONDecodeError, ValueError):
         gaps = get_profile_gaps(attributes)
 
+    # Make "complete" deterministic: gaps are the source of truth.
+    # Some model outputs can mistakenly report score=100 with is_complete=false;
+    # the UI and routing depend on a consistent boolean.
+    if not gaps:
+        is_complete = True
+    elif is_complete:
+        # If a model claims complete but also returns gaps, prefer the gaps.
+        is_complete = False
+
     try:
         synthesized: dict = json.loads(getattr(pred, "synthesized_attributes_json", "{}") or "{}")
         if not isinstance(synthesized, dict):

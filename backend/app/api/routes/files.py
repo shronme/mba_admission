@@ -4,7 +4,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +13,7 @@ from urllib.parse import quote
 from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
 from app.core.storage import get_storage_backend, storage_key_for_upload
-from app.db.enums import FileStatus
+from app.db.enums import DocumentType, FileStatus
 from app.db.models.files import UploadedFile
 
 router = APIRouter(prefix="/files", tags=["files"])
@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 
 def _file_to_dto(f: UploadedFile) -> dict[str, Any]:
+    uploaded_stage: int | None = None
+    if isinstance(getattr(f, "extra", None), dict):
+        raw = (f.extra or {}).get("uploaded_stage")
+        if isinstance(raw, int):
+            uploaded_stage = raw
+        elif isinstance(raw, str) and raw.strip().isdigit():
+            try:
+                uploaded_stage = int(raw.strip())
+            except Exception:
+                uploaded_stage = None
     return {
         "id": str(f.id),
         "original_filename": f.original_filename,
@@ -29,6 +39,7 @@ def _file_to_dto(f: UploadedFile) -> dict[str, Any]:
         "byte_size": f.byte_size,
         "status": f.status.value,
         "document_type": f.document_type.value if f.document_type else None,
+        "uploaded_stage": uploaded_stage,
     }
 
 
@@ -51,11 +62,31 @@ async def list_files(
 @router.post("/upload", response_model=None)
 async def upload_files(
     files: list[UploadFile] = File(...),
+    document_type_hint: str | None = Form(default=None),
+    uploaded_stage: int | None = Form(default=None),
     candidate_id: UUID = Depends(get_candidate_id_from_bearer_token),
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
+
+    preset_doc_type: DocumentType | None = None
+    if document_type_hint is not None:
+        if len(files) != 1:
+            raise HTTPException(
+                status_code=400,
+                detail="document_type_hint is only allowed when uploading a single file",
+            )
+        h = document_type_hint.strip().lower()
+        if h == "cv":
+            preset_doc_type = DocumentType.CV
+        elif h == "life_story":
+            preset_doc_type = DocumentType.LIFE_STORY
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="document_type_hint must be 'cv' or 'life_story'",
+            )
 
     storage = get_storage_backend()
     logger.info("files_upload start candidate_id=%s file_count=%s", candidate_id, len(files))
@@ -65,6 +96,11 @@ async def upload_files(
         original_filename = uf.filename or "upload"
         content_type = uf.content_type
 
+        extra: dict[str, Any] | None = None
+        if uploaded_stage is not None:
+            # best-effort: store as JSON metadata (no schema migration)
+            extra = {"uploaded_stage": int(uploaded_stage)}
+
         # Create metadata row first (so we get a stable file id for the object key).
         row = UploadedFile(
             candidate_id=candidate_id,
@@ -73,7 +109,8 @@ async def upload_files(
             byte_size=None,
             storage_uri="pending",
             status=FileStatus.UPLOADING,
-            extra=None,
+            document_type=preset_doc_type,
+            extra=extra,
         )
         session.add(row)
         await session.flush()
