@@ -117,7 +117,9 @@ def _compute_intake_phase(file_count: int, attributes: dict[str, Any]) -> str:
     if file_count == 0:
         return "intro"
     has_doc_content = any(attributes.get(k) for k in _DOC_DERIVED_ATTRS)
-    target_programs_filled = bool(attributes.get("target_programs"))
+    target_programs_filled = bool(attributes.get("target_programs")) or bool(
+        attributes.get("target_schools")
+    )
     if has_doc_content or target_programs_filled:
         return "gap_filling"
     return "bridge"

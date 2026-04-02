@@ -6,7 +6,9 @@ Kept for backwards compatibility. Delegates to the same User+Candidate creation 
 from __future__ import annotations
 
 import logging
+import os
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -19,12 +21,18 @@ from app.core.db import get_db_session
 from app.db.enums import UserRole
 from app.db.models.candidate import Candidate, CandidateProfile
 from app.constants.grad_program_focus import GRAD_PROGRAM_FOCUS_TO_TYPE
+from app.constants.target_us_schools import (
+    INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
+    TIER_1_US_TARGET_SCHOOLS,
+    TIER_2_US_TARGET_SCHOOLS,
+)
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.candidates import (
     CandidateEnterRequest,
     CandidateEnterResponse,
     CandidateIntakeUpdate,
+    CandidateIntakeStepUpdate,
     CandidateOut,
     CandidateProfileOut,
 )
@@ -53,6 +61,30 @@ def _candidate_to_out(c: Candidate) -> CandidateOut:
 def _default_full_name(email: str) -> str:
     local = email.split("@", 1)[0].strip()
     return re.sub(r"[._-]+", " ", local).title() or "Applicant"
+
+
+class ProfileGapQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(..., description="Profile attribute key (e.g. core_identity).")
+    question: str = Field(..., description="Targeted question to fill this gap.")
+
+
+class ProfileReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_complete: bool
+    completeness_score: int = Field(..., ge=0, le=100)
+    missing: list[ProfileGapQuestion]
+
+
+class ProfileGapAnswersRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answers: dict[str, str] = Field(
+        ...,
+        description="Map of profile attribute key -> candidate answer text.",
+    )
 
 
 @router.post("/enter", response_model=CandidateEnterResponse)
@@ -106,6 +138,18 @@ async def enter_with_email(
         candidate=_candidate_to_out(candidate),
         session_token=str(token),
     )
+
+
+@router.get("/intake/target-schools", response_model=None)
+async def list_intake_target_schools(
+    _candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+) -> dict[str, Any]:
+    """Curated US MBA lists for the intake form — single source of truth with validation."""
+    return {
+        "tier_1": list(TIER_1_US_TARGET_SCHOOLS),
+        "tier_2": list(TIER_2_US_TARGET_SCHOOLS),
+        "max_selections": INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
+    }
 
 
 @router.get("/me", response_model=CandidateOut)
@@ -162,9 +206,211 @@ async def patch_me_intake(
     profile.country_of_residence = body.country_of_residence.strip()
     profile.date_of_birth = body.date_of_birth
     profile.grad_program_focus = body.grad_program_focus
+    attrs = dict(profile.attributes or {})
+    attrs["target_schools"] = body.target_schools
+    profile.attributes = attrs
     profile.intake_form_completed = True
 
     await session.commit()
     await session.refresh(candidate, ["profile", "user"])
     logger.info("candidate_intake_completed candidate_id=%s", candidate_id)
     return _candidate_to_out(candidate)
+
+
+@router.patch("/me/intake/draft", response_model=CandidateOut)
+async def patch_me_intake_draft(
+    body: CandidateIntakeUpdate,
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> CandidateOut:
+    """Save Step 1 intake answers without marking intake complete."""
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(Candidate)
+        .options(
+            selectinload(Candidate.profile),
+            selectinload(Candidate.user),
+        )
+        .where(Candidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    user_repo = UserRepository(session)
+    await user_repo.update_full_name(candidate.user_id, body.full_name)
+    candidate.program_type = GRAD_PROGRAM_FOCUS_TO_TYPE[body.grad_program_focus]
+
+    profile = candidate.profile
+    if profile is None:
+        profile = CandidateProfile(candidate_id=candidate.id)
+        session.add(profile)
+        candidate.profile = profile
+
+    profile.country_of_residence = body.country_of_residence.strip()
+    profile.date_of_birth = body.date_of_birth
+    profile.grad_program_focus = body.grad_program_focus
+
+    attrs = dict(profile.attributes or {})
+    attrs["target_schools"] = body.target_schools
+    attrs["intake_step_completed"] = max(int(attrs.get("intake_step_completed") or 0), 1)
+    profile.attributes = attrs
+
+    # Do NOT set intake_form_completed here. This endpoint is for draft saves.
+    await session.commit()
+    await session.refresh(candidate, ["profile", "user"])
+    logger.info("candidate_intake_draft_saved candidate_id=%s", candidate_id)
+    return _candidate_to_out(candidate)
+
+
+@router.patch("/me/intake/step", response_model=CandidateOut)
+async def patch_me_intake_step(
+    body: CandidateIntakeStepUpdate,
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> CandidateOut:
+    """Persist step completion progress in profile.attributes."""
+    from sqlalchemy import select
+
+    result = await session.execute(
+        select(Candidate)
+        .options(
+            selectinload(Candidate.profile),
+            selectinload(Candidate.user),
+        )
+        .where(Candidate.id == candidate_id)
+    )
+    candidate = result.scalar_one_or_none()
+    if candidate is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    profile = candidate.profile
+    if profile is None:
+        profile = CandidateProfile(candidate_id=candidate.id)
+        session.add(profile)
+        candidate.profile = profile
+
+    attrs = dict(profile.attributes or {})
+    current = int(attrs.get("intake_step_completed") or 0)
+    attrs["intake_step_completed"] = max(current, int(body.intake_step_completed))
+    profile.attributes = attrs
+
+    await session.commit()
+    await session.refresh(candidate, ["profile", "user"])
+    logger.info(
+        "candidate_intake_step_saved candidate_id=%s step=%s",
+        candidate_id,
+        body.intake_step_completed,
+    )
+    return _candidate_to_out(candidate)
+
+
+def _gap_to_question(key: str) -> str:
+    from app.dspy.profile_agent import PROFILE_ATTRIBUTE_SCHEMA
+
+    desc = (PROFILE_ATTRIBUTE_SCHEMA.get(key) or "").strip()
+    if desc:
+        return f"To complete your profile, please answer this about your {key.replace('_', ' ')}:\n\n{desc}\n\nWrite 3–8 sentences with specific examples."
+    return f"Please provide details for: {key.replace('_', ' ')}."
+
+
+@router.get("/me/profile/review", response_model=ProfileReviewResponse)
+async def review_profile_completeness(
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> ProfileReviewResponse:
+    """
+    Step 4 (Final Intake Review): run the ProfileAgent on the current profile and
+    return only the missing/insufficient attributes as targeted questions.
+    """
+    from sqlalchemy import select
+    from app.dspy.profile_agent import CANDIDATE_INPUT_ATTRIBUTES, run_profile_agent
+
+    result = await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))
+    profile = result.scalar_one_or_none()
+    attrs = dict(profile.attributes or {}) if profile is not None else {}
+    stored_score = int(profile.completeness_score) if profile is not None else 0
+
+    use_openai = (
+        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
+        and bool(os.getenv("OPENAI_API_KEY"))
+    )
+    is_complete, gaps, synthesized, score = run_profile_agent(
+        attrs, use_openai=use_openai, min_score=stored_score
+    )
+
+    # Best-effort persist synthesized + score + completion flag so the UI and later chat are consistent.
+    try:
+        repo = CandidateRepository(session)
+        if synthesized:
+            await repo.merge_profile_attributes(candidate_id, synthesized, overwrite=True)
+        await repo.set_profile_complete(candidate_id, complete=is_complete, score=score)
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        logger.exception("profile_review_persist_failed candidate_id=%s", candidate_id)
+
+    # Keep a stable ordering for the UI.
+    ordered_gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if k in set(gaps)]
+    return ProfileReviewResponse(
+        profile_complete=bool(is_complete),
+        completeness_score=int(score),
+        missing=[ProfileGapQuestion(key=k, question=_gap_to_question(k)) for k in ordered_gaps],
+    )
+
+
+@router.patch("/me/profile/answers", response_model=ProfileReviewResponse)
+async def submit_profile_gap_answers(
+    body: ProfileGapAnswersRequest,
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> ProfileReviewResponse:
+    """
+    Step 4 (Final Intake Review): accept targeted answers for missing attributes,
+    merge them into profile.attributes, then re-run ProfileAgent and return the next
+    set of required questions (if any).
+    """
+    from sqlalchemy import select
+    from app.dspy.profile_agent import CANDIDATE_INPUT_ATTRIBUTES, run_profile_agent
+
+    allowed = set(CANDIDATE_INPUT_ATTRIBUTES)
+    updates: dict[str, str] = {}
+    for k, v in (body.answers or {}).items():
+        key = str(k).strip()
+        if key not in allowed:
+            continue
+        text = str(v).strip()
+        if text:
+            updates[key] = text
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No valid answers provided.")
+
+    repo = CandidateRepository(session)
+    await repo.merge_profile_attributes(candidate_id, updates, overwrite=True)
+
+    prof_res = await session.execute(select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id))
+    profile = prof_res.scalar_one_or_none()
+    attrs = dict(profile.attributes or {}) if profile is not None else dict(updates)
+    stored_score = int(profile.completeness_score) if profile is not None else 0
+
+    use_openai = (
+        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
+        and bool(os.getenv("OPENAI_API_KEY"))
+    )
+    is_complete, gaps, synthesized, score = run_profile_agent(
+        attrs, use_openai=use_openai, min_score=stored_score
+    )
+
+    if synthesized:
+        await repo.merge_profile_attributes(candidate_id, synthesized, overwrite=True)
+    await repo.set_profile_complete(candidate_id, complete=is_complete, score=score)
+    await session.commit()
+
+    ordered_gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if k in set(gaps)]
+    return ProfileReviewResponse(
+        profile_complete=bool(is_complete),
+        completeness_score=int(score),
+        missing=[ProfileGapQuestion(key=k, question=_gap_to_question(k)) for k in ordered_gaps],
+    )

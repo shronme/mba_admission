@@ -12,6 +12,18 @@ from app.core.config import settings
 from app.core.db import get_db_session
 from app.main import app
 import app.core.storage as storage_module
+from app.workers.tasks.document_processing import process_uploaded_document
+
+
+@pytest.fixture(autouse=True)
+def _skip_document_processing_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Uploads enqueue Celery on the shared broker; the worker container cannot read
+    pytest's LOCAL_STORAGE_DIR (tmp_path). These tests only assert API/auth behaviour,
+    not background extraction — avoid cross-service FileNotFoundError noise.
+    """
+
+    monkeypatch.setattr(process_uploaded_document, "delay", lambda *_a, **_kw: None)
 
 
 @pytest.mark.asyncio
@@ -158,6 +170,118 @@ async def test_candidate_cannot_download_other_candidate_file(
 
             download_resp = await client.get(f"/files/{file_id}/download", headers=auth2)
             assert download_resp.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upload_single_file_accepts_document_type_hint(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "hintdoc@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+
+            files = [("files", ("cv.txt", b"work experience", "text/plain"))]
+            data = {"document_type_hint": "cv"}
+            upload_resp = await client.post("/files/upload", headers=auth, files=files, data=data)
+            assert upload_resp.status_code == 200, upload_resp.text
+            meta = upload_resp.json()["files"][0]
+            assert meta.get("document_type") == "cv"
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_document_type_hint_with_multiple_files(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "multihint@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            files = [
+                ("files", ("a.txt", b"a", "text/plain")),
+                ("files", ("b.txt", b"b", "text/plain")),
+            ]
+            data = {"document_type_hint": "cv"}
+            upload_resp = await client.post("/files/upload", headers=auth, files=files, data=data)
+            assert upload_resp.status_code == 400
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_intake_persists_target_schools(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "intakeschools@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            body = {
+                "full_name": "Pat Example",
+                "country_of_residence": "United States",
+                "date_of_birth": "1992-06-01",
+                "grad_program_focus": "mba_full_time",
+                "target_schools": ["Harvard Business School", "Stanford Graduate School of Business"],
+            }
+            r = await client.patch("/candidates/me/intake", headers=auth, json=body)
+            assert r.status_code == 200, r.text
+            profile = r.json()["profile"]
+            assert profile["intake_form_completed"] is True
+            assert profile["attributes"]["target_schools"] == body["target_schools"]
+
+            bad = await client.patch(
+                "/candidates/me/intake",
+                headers=auth,
+                json={**body, "target_schools": ["Not A Real B-School"]},
+            )
+            assert bad.status_code == 422
+
+            schools_resp = await client.get("/candidates/intake/target-schools", headers=auth)
+            assert schools_resp.status_code == 200, schools_resp.text
+            payload = schools_resp.json()
+            assert "Harvard Business School" in payload["tier_1"]
+            assert isinstance(payload["tier_2"], list)
+            assert payload["max_selections"] == 24
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         await engine.dispose()

@@ -75,12 +75,6 @@ _RICH_TRANSFERABLE = (
     "early-stage environments. Community credibility in fintech circles through "
     "conference speaking and open-source contributions."
 )
-_RICH_RISKS = (
-    "GPA of 3.1 from undergrad (engineering programme at a target school — context helps). "
-    "No international work experience yet, which matters for the emerging-market narrative. "
-    "Limited quant background relative to finance-track applicants — will need to "
-    "address this in essays and potentially via a pre-MBA quant course."
-)
 
 # ── Cyber / national-security → climate pivot (all fields present, all thin) ──
 _CYBER_CLIMATE_CORE_IDENTITY = (
@@ -112,10 +106,6 @@ _CYBER_CLIMATE_TENSION = (
 _CYBER_CLIMATE_TRANSFERABLE = (
     "Leading complex organizations. Operating under uncertainty. Managing risk. "
     "Building scalable systems. Driving execution across stakeholders."
-)
-_CYBER_CLIMATE_RISKS = (
-    "Pivot credibility risk. Over-specialization in security. "
-    "Need for concrete climate goals. Avoid overstatement."
 )
 
 # ── finance operator → PE builder (all fields present, mixed richness) ──
@@ -156,10 +146,6 @@ _DANIEL_TRANSFERABLE = (
     "Leadership of large teams. Budget ownership ($15M). "
     "Measurable impact including IRR improvement and cost savings."
 )
-_DANIEL_RISKS = (
-    "May appear too standard a finance profile. Risk of a generic IB-to-PE story. "
-    "Needs emotional and human depth. Requires strong US transition narrative."
-)
 
 # ── commercial operator → impact investor (all fields present, mixed richness) ──
 _SARA_CORE_IDENTITY = (
@@ -197,11 +183,6 @@ _SARA_TENSION = (
 _SARA_TRANSFERABLE = (
     "Understanding of startup ecosystems. Deal flow exposure. Growth and scaling experience. "
     "Partnership building. Market entry understanding."
-)
-_SARA_RISKS = (
-    "Perceived as a sales profile rather than a strategic one. "
-    "Weak formal finance background. GMAT weakness. "
-    "Generic impact story risk. Needs a strong bridge to investing."
 )
 
 
@@ -260,13 +241,12 @@ EXAMPLES: list[dspy.Example] = [
             "differentiation_layer",
             "intellectual_working_style",
             "transferable_assets",
-            "risks",
             "motivation",
             "core_tension",
         }),
         expected_score_range=(20, 50),
     ),
-    # ------------------------------------------ all 9 present but 2 are very thin
+    # ------------------------------------------ all 8 present but one is very thin
     _ex(
         {
             "core_identity": _RICH_CORE_IDENTITY,
@@ -277,29 +257,27 @@ EXAMPLES: list[dspy.Example] = [
             "motivation": _RICH_MOTIVATION,
             "core_tension": _RICH_CORE_TENSION,
             "transferable_assets": "I have transferable skills.",   # thin
-            "risks": "Low GPA.",                                     # thin
         },
         expected_is_complete="false",
-        expected_gaps=frozenset({"transferable_assets", "risks"}),
+        expected_gaps=frozenset({"transferable_assets"}),
         expected_score_range=(50, 80),
     ),
-    # --------------------------------------- missing only one attribute (risks)
+    # --------------------------------------- missing only one attribute
     _ex(
         {
             "core_identity": _RICH_CORE_IDENTITY,
             "domain_base": _RICH_DOMAIN_BASE,
             "core_strengths": _RICH_CORE_STRENGTHS,
             "differentiation_layer": _RICH_DIFFERENTIATION,
-            "intellectual_working_style": _RICH_INTELLECTUAL,
             "motivation": _RICH_MOTIVATION,
             "core_tension": _RICH_CORE_TENSION,
             "transferable_assets": _RICH_TRANSFERABLE,
         },
         expected_is_complete="false",
-        expected_gaps=frozenset({"risks"}),
+        expected_gaps=frozenset({"intellectual_working_style"}),
         expected_score_range=(65, 92),
     ),
-    # -------------------------------------------- complete profile (all 9 rich)
+    # -------------------------------------------- complete profile (all 8 rich)
     _ex(
         {
             "core_identity": _RICH_CORE_IDENTITY,
@@ -310,7 +288,6 @@ EXAMPLES: list[dspy.Example] = [
             "motivation": _RICH_MOTIVATION,
             "core_tension": _RICH_CORE_TENSION,
             "transferable_assets": _RICH_TRANSFERABLE,
-            "risks": _RICH_RISKS,
         },
         expected_is_complete="true",
         expected_gaps=frozenset(),
@@ -363,18 +340,12 @@ EXAMPLES: list[dspy.Example] = [
                 "commercial opportunities. Strong ability to build trust with people from "
                 "very different backgrounds."
             ),
-            "risks": (
-                "No MBA-track professional experience (consulting, banking, PE). Low quant "
-                "signal — no finance or analytical roles on record. GRE taken 3 years ago "
-                "(strong verbal, adequate quant). Will need to address the 'why not a "
-                "government/defence think-tank' question in essays."
-            ),
         },
         expected_is_complete="true",
         expected_gaps=frozenset(),
         expected_score_range=(80, 100),
     ),
-    # ------------- cyber/national-security → climate pivot: all 9 fields, all thin
+    # ------------- cyber/national-security → climate pivot: all 8 fields, all thin
     _ex(
         {
             "core_identity": _CYBER_CLIMATE_CORE_IDENTITY,
@@ -385,13 +356,12 @@ EXAMPLES: list[dspy.Example] = [
             "motivation": _CYBER_CLIMATE_MOTIVATION,
             "core_tension": _CYBER_CLIMATE_TENSION,
             "transferable_assets": _CYBER_CLIMATE_TRANSFERABLE,
-            "risks": _CYBER_CLIMATE_RISKS,
         },
         expected_is_complete="false",
         expected_gaps=frozenset(CANDIDATE_INPUT_ATTRIBUTES),
         expected_score_range=(10, 40),
     ),
-    # ----------- finance operator → PE builder: all 9, mixed richness
+    # ----------- finance operator → PE builder: all 8, mixed richness
     _ex(
         {
             "core_identity": _DANIEL_CORE_IDENTITY,
@@ -402,13 +372,12 @@ EXAMPLES: list[dspy.Example] = [
             "motivation": _DANIEL_MOTIVATION,
             "core_tension": _DANIEL_TENSION,
             "transferable_assets": _DANIEL_TRANSFERABLE,
-            "risks": _DANIEL_RISKS,
         },
         expected_is_complete="false",
         expected_gaps=frozenset({"core_identity", "intellectual_working_style", "core_tension"}),
         expected_score_range=(35, 65),
     ),
-    # ------------ commercial operator → impact investor: all 9, mixed richness
+    # ------------ commercial operator → impact investor: all 8, mixed richness
     _ex(
         {
             "core_identity": _SARA_CORE_IDENTITY,
@@ -419,7 +388,6 @@ EXAMPLES: list[dspy.Example] = [
             "motivation": _SARA_MOTIVATION,
             "core_tension": _SARA_TENSION,
             "transferable_assets": _SARA_TRANSFERABLE,
-            "risks": _SARA_RISKS,
         },
         expected_is_complete="false",
         expected_gaps=frozenset({"core_identity", "intellectual_working_style"}),

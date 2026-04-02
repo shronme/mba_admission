@@ -20,7 +20,6 @@ _MOCK_QUESTION_HINTS: dict[str, str] = {
     "motivation": "what's driving you to pursue an MBA right now, specifically?",
     "core_tension": "where do you feel the biggest gap between where you are today and where you want to go?",
     "transferable_assets": "what skills or experiences from your background do you think translate most directly to your target direction?",
-    "risks": "are there any parts of your profile — GPA, work history, career pivot — that you think admissions committees will scrutinise?",
     "target_programs": "have you started thinking about which programs or schools you're interested in? Even a rough list helps — reach schools, safe bets, or program types you're drawn to.",
 }
 
@@ -412,10 +411,5 @@ def _extract_profile_updates(user_message: str, existing_profile: dict) -> dict:
         kw in msg_lower for kw in ("transferable", "bring", "apply", "leverage", "experience in", "background in")
     ):
         updates["transferable_assets"] = user_message.strip()
-
-    if "risks" not in existing_profile and any(
-        kw in msg_lower for kw in ("weak", "gap", "missing", "lack", "haven't", "low gpa", "low gmat", "concern")
-    ):
-        updates["risks"] = user_message.strip()
 
     return updates

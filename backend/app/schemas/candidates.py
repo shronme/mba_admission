@@ -9,6 +9,10 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.constants.grad_program_focus import ALLOWED_GRAD_PROGRAM_FOCUS
+from app.constants.target_us_schools import (
+    ALLOWED_TARGET_US_SCHOOLS,
+    INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
+)
 
 
 class CandidateEnterRequest(BaseModel):
@@ -67,6 +71,12 @@ class CandidateIntakeUpdate(BaseModel):
     country_of_residence: str = Field(..., min_length=1, max_length=128)
     date_of_birth: date
     grad_program_focus: str = Field(..., min_length=1, max_length=128)
+    target_schools: list[str] = Field(
+        ...,
+        min_length=1,
+        max_length=INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
+        description="US MBA programs under consideration (from the curated intake list).",
+    )
 
     @field_validator("grad_program_focus")
     @classmethod
@@ -75,6 +85,24 @@ class CandidateIntakeUpdate(BaseModel):
         if key not in ALLOWED_GRAD_PROGRAM_FOCUS:
             raise ValueError("Invalid program selection")
         return key
+
+    @field_validator("target_schools")
+    @classmethod
+    def target_schools_allowed(cls, v: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for raw in v:
+            name = raw.strip()
+            if not name:
+                continue
+            if name not in ALLOWED_TARGET_US_SCHOOLS:
+                raise ValueError("Invalid or unsupported school selection")
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+        if not out:
+            raise ValueError("Select at least one target school")
+        return out
 
     @field_validator("date_of_birth")
     @classmethod
@@ -85,3 +113,11 @@ class CandidateIntakeUpdate(BaseModel):
         if v.year < 1900:
             raise ValueError("date_of_birth is too far in the past")
         return v
+
+
+class CandidateIntakeStepUpdate(BaseModel):
+    """Persist front-end intake step progress without completing the intake."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    intake_step_completed: int = Field(..., ge=0, le=4)

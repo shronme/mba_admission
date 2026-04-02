@@ -85,7 +85,6 @@ _CV_KEYWORDS: dict[str, list[str]] = {
     "domain_base": ["government", "public sector", "military", "ngo", "finance", "technology", "consulting", "healthcare"],
     "core_strengths": ["led", "managed", "built", "launched", "delivered", "drove", "achieved", "implemented"],
     "transferable_assets": ["strategic", "cross-functional", "stakeholder", "p&l", "budget", "team", "program"],
-    "risks": ["gap", "pivot", "change"],
 }
 
 _LIFE_STORY_KEYWORDS: dict[str, list[str]] = {
@@ -117,16 +116,86 @@ class MockProfileAttributeExtractor(dspy.Module):
         except (json.JSONDecodeError, ValueError):
             existing = {}
 
-        text_lower = document_text.lower()
-        updates: dict[str, str] = {}
+        def _clean(s: str) -> str:
+            s = (s or "").strip()
+            s = s.replace("\r\n", "\n").replace("\r", "\n")
+            # Collapse excessive whitespace but keep paragraph breaks.
+            s = "\n".join(" ".join(line.split()) for line in s.split("\n"))
+            s = "\n".join([line for line in s.split("\n") if line.strip()])
+            # Avoid placeholder artifacts that leak from docs.
+            s = s.replace("???", "").strip()
+            return s
 
+        def _drop_contact_header(s: str) -> str:
+            """
+            Remove typical CV header/contact blocks so we don't store address/phone/email
+            blobs as "core_identity" etc.
+            """
+            lines = [ln.strip() for ln in (s or "").splitlines()]
+            out: list[str] = []
+            for ln in lines:
+                low = ln.lower()
+                if not ln:
+                    continue
+                if "@" in ln and "." in ln:
+                    continue
+                if any(tok in low for tok in ("street", "st.", "ave", "road", "rd", "tel", "phone", "mobile")):
+                    continue
+                # Very phone-number-like.
+                digits = sum(ch.isdigit() for ch in ln)
+                if digits >= 7 and digits / max(1, len(ln)) > 0.25:
+                    continue
+                out.append(ln)
+            # If we removed too much, fall back to original.
+            return "\n".join(out) if len(out) >= max(3, len(lines) // 3) else s
+
+        def _extract_window_around(text: str, needle: str, *, window: int = 500) -> str | None:
+            t = text or ""
+            idx = (t.lower()).find(needle.lower())
+            if idx < 0:
+                return None
+            start = max(0, idx - window // 2)
+            end = min(len(t), idx + window // 2)
+            return t[start:end].strip()
+
+        def _best_snippet_for_keywords(text: str, keywords: list[str]) -> str | None:
+            # Prefer the *first* matched keyword window that isn't just section headers.
+            for kw in keywords:
+                w = _extract_window_around(text, kw)
+                if not w:
+                    continue
+                cleaned = _clean(_drop_contact_header(w))
+                if not cleaned:
+                    continue
+                # Avoid returning pure section labels.
+                if cleaned.lower() in ("education", "professional experience", "experience", "skills", "summary"):
+                    continue
+                return cleaned[:800]
+            return None
+
+        raw = _clean(document_text)
+        filtered = _clean(_drop_contact_header(raw))
+        text_lower = filtered.lower()
+
+        updates: dict[str, str] = {}
         keyword_map = _CV_KEYWORDS if "cv" in document_type.lower() else _LIFE_STORY_KEYWORDS
 
+        # Fill only empty keys, and avoid copying the same snippet into many fields.
+        used_snippets: set[str] = set()
         for attr_key, keywords in keyword_map.items():
-            if any(kw in text_lower for kw in keywords):
-                # Extract the first 300 chars of document as value for that attribute.
-                snippet = document_text.strip()[:300]
-                updates[attr_key] = snippet
+            if existing.get(attr_key):
+                continue
+            if not any(kw in text_lower for kw in keywords):
+                continue
+            snippet = _best_snippet_for_keywords(filtered, keywords)
+            if not snippet:
+                continue
+            # De-duplicate near-identical snippets across keys.
+            normalized = " ".join(snippet.split()).lower()
+            if normalized in used_snippets:
+                continue
+            used_snippets.add(normalized)
+            updates[attr_key] = snippet
 
         return dspy.Prediction(
             attribute_updates_json=json.dumps(updates, ensure_ascii=False),
@@ -170,6 +239,16 @@ def run_profile_attribute_extractor(
         if not isinstance(updates, dict):
             return {}
         # Restrict to valid attribute keys
-        return {k: v for k, v in updates.items() if k in CANDIDATE_INPUT_ATTRIBUTES}
+        cleaned: dict[str, str] = {}
+        for k, v in updates.items():
+            if k not in CANDIDATE_INPUT_ATTRIBUTES:
+                continue
+            if not isinstance(v, str):
+                continue
+            txt = v.strip()
+            if not txt:
+                continue
+            cleaned[k] = txt
+        return cleaned
     except (json.JSONDecodeError, ValueError):
         return {}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  getApiBaseUrl,
   listUploadedFiles,
   uploadFiles,
   type UploadedFileDto,
@@ -131,7 +132,7 @@ export function SidebarDocuments({
     setBusy(true);
     setError(null);
     try {
-      await uploadFiles(selected, sessionToken ?? null);
+      await uploadFiles(selected, sessionToken ?? null, currentStage);
       const out = await listUploadedFiles(sessionToken ?? null);
       setFiles(out);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -148,7 +149,7 @@ export function SidebarDocuments({
       setError("Please sign in again (missing session token).");
       return;
     }
-    const root = process.env.NEXT_PUBLIC_API_URL;
+    const root = getApiBaseUrl();
     if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
 
     const res = await fetch(
@@ -191,6 +192,19 @@ export function SidebarDocuments({
   const readyCount = files.filter((f) => f.status === "ready").length;
   const totalCount = files.length;
 
+  const filesByStage = useMemo(() => {
+    const out = new Map<number, UploadedFileDto[]>();
+    for (const f of files) {
+      const s = typeof f.uploaded_stage === "number" && Number.isFinite(f.uploaded_stage)
+        ? f.uploaded_stage
+        : 1;
+      const arr = out.get(s) ?? [];
+      arr.push(f);
+      out.set(s, arr);
+    }
+    return out;
+  }, [files]);
+
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -230,6 +244,7 @@ export function SidebarDocuments({
           const isCurrent = stageNum === currentStage;
           const isPast = stageNum < currentStage;
           const isOpen = expanded.has(stageNum);
+          const stageFiles = filesByStage.get(stageNum) ?? [];
 
           const stageNumClass = isCurrent
             ? "sidebar-stage-num sidebar-stage-num-current"
@@ -297,14 +312,10 @@ export function SidebarDocuments({
                     </div>
                   )}
 
-                  {/* Files in this stage */}
-                  {files.length === 0 ? (
-                    <p className="text-[11px] text-neutral-400">
-                      No documents yet.
-                    </p>
-                  ) : isCurrent ? (
+                  {/* Files in this stage (render empty list when none) */}
+                  {stageFiles.length > 0 ? (
                     <div className="space-y-2">
-                      {files.map((f) => (
+                      {stageFiles.map((f) => (
                         <div key={f.id} className="sidebar-file-card">
                           <FileIcon />
                           <div className="min-w-0 flex-1">
@@ -332,9 +343,7 @@ export function SidebarDocuments({
                       ))}
                     </div>
                   ) : (
-                    <p className="text-[11px] text-neutral-400">
-                      No documents uploaded for this stage yet.
-                    </p>
+                    <div className="space-y-2" />
                   )}
                 </div>
               )}

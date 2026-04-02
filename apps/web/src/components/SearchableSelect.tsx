@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 
 export type SearchableOption = { value: string; label: string };
 
@@ -32,8 +32,29 @@ export function SearchableSelect({
   const listId = `${autoId}-listbox`;
   const inputId = idProp ?? `${autoId}-input`;
   const rootRef = useRef<HTMLDivElement>(null);
+  const queryRef = useRef("");
+  const optionsRef = useRef(options);
+  const onChangeRef = useRef(onChange);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+
+  queryRef.current = query;
+  optionsRef.current = options;
+  onChangeRef.current = onChange;
+
+  /** Apply typed text to `value` when it exactly matches an option; empty input clears. */
+  const commitQuery = useCallback(() => {
+    const raw = queryRef.current.trim();
+    const q = raw.toLowerCase();
+    if (!q) {
+      onChangeRef.current("");
+      return;
+    }
+    const exact = optionsRef.current.find(
+      (o) => o.label.toLowerCase() === q || o.value.toLowerCase() === q,
+    );
+    if (exact) onChangeRef.current(exact.value);
+  }, []);
 
   const selected = useMemo(
     () => options.find((o) => o.value === value) ?? null,
@@ -49,15 +70,6 @@ export function SearchableSelect({
     );
     return hits.slice(0, maxVisible);
   }, [options, query, maxVisible]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
 
   const displayValue = open ? query : selected?.label ?? "";
 
@@ -80,13 +92,19 @@ export function SearchableSelect({
         onChange={(e) => {
           setQuery(e.target.value);
           if (!open) setOpen(true);
-          if (value) onChange("");
+        }}
+        onBlur={() => {
+          window.setTimeout(() => {
+            if (rootRef.current?.contains(document.activeElement)) return;
+            commitQuery();
+            setOpen(false);
+          }, 0);
         }}
         onFocus={() => {
           setOpen(true);
           setQuery(selected?.label ?? "");
         }}
-        className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-forest-500 focus:outline-none focus:ring-2 focus:ring-forest-500/20 disabled:opacity-50"
+        className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25 disabled:opacity-50"
       />
       {open && !disabled && (
         <ul
@@ -107,7 +125,7 @@ export function SearchableSelect({
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(opt.value);
-                    setQuery("");
+                    setQuery(opt.label);
                     setOpen(false);
                   }}
                 >

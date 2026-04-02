@@ -8,7 +8,7 @@ import dspy
 # Shared attribute schema
 # ---------------------------------------------------------------------------
 
-# The 9 attributes that must be filled through candidate interaction (interview
+# The 8 attributes that must be filled through candidate interaction (interview
 # answers and/or uploaded documents).
 CANDIDATE_INPUT_ATTRIBUTES: list[str] = [
     "core_identity",
@@ -19,7 +19,6 @@ CANDIDATE_INPUT_ATTRIBUTES: list[str] = [
     "motivation",
     "core_tension",
     "transferable_assets",
-    "risks",
 ]
 
 # The 5 attributes synthesized by the Profile Agent from the candidate-input data.
@@ -67,10 +66,6 @@ PROFILE_ATTRIBUTE_SCHEMA: dict[str, str] = {
     "transferable_assets": (
         "Skills, experiences, and capabilities from your background that directly "
         "transfer to your target field or post-MBA goal."
-    ),
-    "risks": (
-        "Honest risks in your application — credibility gaps, pivot concerns, profile "
-        "weaknesses, or narratives that could undermine your case."
     ),
     "target_programs": (
         "The specific MBA programs and schools the candidate is targeting or considering, "
@@ -124,7 +119,7 @@ class ProfileCompletenessSignature(dspy.Signature):
     You are a senior MBA admissions consultant evaluating whether a candidate's
     profile has sufficient information to proceed to school research.
 
-    A profile is COMPLETE when ALL 9 candidate-input attributes have meaningful,
+    A profile is COMPLETE when ALL 8 candidate-input attributes have meaningful,
     specific content — not vague summaries, single words, or placeholders.
 
     Additionally, synthesize the 5 derived attributes (strategy, narrative_direction,
@@ -133,13 +128,13 @@ class ProfileCompletenessSignature(dspy.Signature):
     Return:
     - is_complete: 'true' or 'false'
     - completeness_score: integer 0–100 representing overall profile quality.
-      Score each of the 9 candidate-input attributes from 0–11 (11 points each,
-      total 99 + 1 rounding point = 100 max):
+      Score each of the 8 candidate-input attributes from 0–12 (12 points each,
+      total 96 + 4 rounding headroom = 100 max):
         0  = attribute is absent
         4  = present but vague (single sentence, generic, no specifics)
         8  = good content but could be richer or more specific
-        11 = excellent: specific, concrete, well-articulated
-      Sum the scores across all 9 attributes. 100 = truly complete and polished.
+        12 = excellent: specific, concrete, well-articulated
+      Sum the scores across all 8 attributes. 100 = truly complete and polished.
       IMPORTANT: The candidate's current score is provided in `current_completeness_score`.
       Because profile data only grows (answers are never removed), your score MUST be
       greater than or equal to `current_completeness_score`. Returning a lower score
@@ -167,7 +162,7 @@ class ProfileCompletenessSignature(dspy.Signature):
 
     is_complete: str = dspy.OutputField(desc="'true' if the profile is complete, 'false' otherwise.")
     completeness_score: str = dspy.OutputField(
-        desc="Integer 0–100 representing overall profile quality. 100 means all 9 attributes are fully articulated."
+        desc="Integer 0–100 representing overall profile quality. 100 means all 8 attributes are fully articulated."
     )
     gaps_json: str = dspy.OutputField(
         desc="JSON array of candidate-input attribute keys that are missing or insufficient. Empty array [] if complete."
@@ -208,7 +203,7 @@ class MockProfileAgent(dspy.Module):
     """
     Deterministic completeness checker for mock/test mode.
 
-    - Marks complete when all 9 candidate-input keys are non-empty.
+    - Marks complete when all 8 candidate-input keys are non-empty.
     - Synthesizes placeholder values for the 5 derived attributes from whatever
       data is present, so callers always receive the full expected structure.
     """
@@ -230,7 +225,7 @@ class MockProfileAgent(dspy.Module):
         gaps = [key for key in CANDIDATE_INPUT_ATTRIBUTES if not attrs.get(key)]
         is_complete = len(gaps) == 0
 
-        # Score: 11 points per filled attribute (9 attrs × 11 = 99, rounded to 100 when complete).
+        # Score: proportional to filled attributes (8 attrs → 100 when all filled).
         filled_count = len(CANDIDATE_INPUT_ATTRIBUTES) - len(gaps)
         score = min(100, round(filled_count / len(CANDIDATE_INPUT_ATTRIBUTES) * 100))
 
@@ -287,6 +282,15 @@ def run_profile_agent(
 
     min_score = max(0, min(100, min_score))
 
+    def _has_content(value: object) -> bool:
+        if value is None:
+            return False
+        if isinstance(value, str):
+            return bool(value.strip())
+        if isinstance(value, (list, tuple, set, dict)):
+            return len(value) > 0
+        return True
+
     # Strip internal reserved keys (e.g. _completeness_score) before sending to
     # the LLM so they don't pollute the completeness assessment.
     clean_attrs = {k: v for k, v in (attributes or {}).items() if not k.startswith("_")}
@@ -299,16 +303,22 @@ def run_profile_agent(
         current_completeness_score=str(min_score),
     )
 
+    structural_gaps = [k for k in CANDIDATE_INPUT_ATTRIBUTES if not _has_content(clean_attrs.get(k))]
+    structural_max_score = min(
+        100,
+        round((len(CANDIDATE_INPUT_ATTRIBUTES) - len(structural_gaps)) / len(CANDIDATE_INPUT_ATTRIBUTES) * 100),
+    )
+
     raw_complete = str(getattr(pred, "is_complete", "false")).strip().lower()
     is_complete = raw_complete == "true"
 
     try:
         score = int(str(getattr(pred, "completeness_score", "0")).strip())
-        score = max(min_score, min(100, score))
+        score = min(structural_max_score, min(100, score))
+        score = max(min_score, score) if min_score <= structural_max_score else structural_max_score
     except (ValueError, TypeError):
         # Fallback: proportion of filled candidate-input attributes.
-        filled = sum(1 for k in CANDIDATE_INPUT_ATTRIBUTES if (attributes or {}).get(k))
-        score = max(min_score, min(100, round(filled / len(CANDIDATE_INPUT_ATTRIBUTES) * 100)))
+        score = max(min_score, structural_max_score) if min_score <= structural_max_score else structural_max_score
 
     try:
         gaps: list[str] = json.loads(getattr(pred, "gaps_json", "[]") or "[]")
@@ -316,6 +326,17 @@ def run_profile_agent(
             gaps = []
     except (json.JSONDecodeError, ValueError):
         gaps = get_profile_gaps(attributes)
+
+    gaps = sorted(set(structural_gaps).union(gaps))
+
+    # Make "complete" deterministic: required-attribute presence + gaps are the source of truth.
+    # Some model outputs can mistakenly report score=100 with is_complete=false;
+    # the UI and routing depend on a consistent boolean.
+    if not gaps:
+        is_complete = True
+    elif is_complete:
+        # If a model claims complete but also returns gaps, prefer the gaps.
+        is_complete = False
 
     try:
         synthesized: dict = json.loads(getattr(pred, "synthesized_attributes_json", "{}") or "{}")
