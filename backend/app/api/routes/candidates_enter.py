@@ -20,12 +20,13 @@ from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
 from app.db.enums import UserRole
 from app.db.models.candidate import Candidate, CandidateProfile
-from app.constants.grad_program_focus import GRAD_PROGRAM_FOCUS_TO_TYPE
-from app.constants.target_us_schools import (
-    INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
-    TIER_1_US_TARGET_SCHOOLS,
-    TIER_2_US_TARGET_SCHOOLS,
+from app.constants.grad_program_focus import ALLOWED_GRAD_PROGRAM_FOCUS, GRAD_PROGRAM_FOCUS_TO_TYPE
+from app.constants.graduate_programs_catalog import (
+    INTAKE_OTHER_SCHOOL_SENTINEL,
+    ORDERED_SCHOOL_NAMES,
+    PROGRAMS_BY_SCHOOL,
 )
+from app.constants.target_us_schools import INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.candidates import (
@@ -41,6 +42,43 @@ import uuid
 
 router = APIRouter(prefix="/candidates", tags=["candidates"])
 logger = logging.getLogger(__name__)
+
+
+def _intake_school_tiers() -> tuple[list[str], list[str]]:
+    names = list(ORDERED_SCHOOL_NAMES)
+    mid = (len(names) + 1) // 2
+    tier_1, tier_2 = names[:mid], names[mid:]
+    tier_2 = [*tier_2, INTAKE_OTHER_SCHOOL_SENTINEL]
+    return tier_1, tier_2
+
+
+def _intake_programs_by_school_payload() -> dict[str, list[dict[str, str]]]:
+    out: dict[str, list[dict[str, str]]] = {}
+    for school, entries in PROGRAMS_BY_SCHOOL.items():
+        rows: list[dict[str, str]] = []
+        for e in entries:
+            slug = e.get("slug")
+            if not isinstance(slug, str) or slug not in ALLOWED_GRAD_PROGRAM_FOCUS:
+                continue
+            label = e.get("label")
+            rows.append({"slug": slug, "label": str(label) if label is not None else slug})
+        out[school] = rows
+    return out
+
+
+def _merge_intake_profile_attributes(attrs: dict[str, Any], body: CandidateIntakeUpdate) -> None:
+    attrs["target_schools"] = body.target_schools
+    if INTAKE_OTHER_SCHOOL_SENTINEL in body.target_schools:
+        tso = (body.target_schools_other or "").strip()
+        attrs["target_schools_other"] = tso if tso else None
+    else:
+        attrs.pop("target_schools_other", None)
+
+    if body.grad_program_focus == "other_graduate":
+        gpo = (body.grad_program_focus_other or "").strip()
+        attrs["grad_program_focus_other"] = gpo if gpo else None
+    else:
+        attrs.pop("grad_program_focus_other", None)
 
 
 def _candidate_to_out(c: Candidate) -> CandidateOut:
@@ -144,11 +182,14 @@ async def enter_with_email(
 async def list_intake_target_schools(
     _candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
 ) -> dict[str, Any]:
-    """Curated US MBA lists for the intake form — single source of truth with validation."""
+    """Schools and per-school program slugs for intake — from graduate_programs_by_school.json."""
+    tier_1, tier_2 = _intake_school_tiers()
     return {
-        "tier_1": list(TIER_1_US_TARGET_SCHOOLS),
-        "tier_2": list(TIER_2_US_TARGET_SCHOOLS),
+        "tier_1": list(tier_1),
+        "tier_2": list(tier_2),
         "max_selections": INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
+        "programs_by_school": _intake_programs_by_school_payload(),
+        "other_school_value": INTAKE_OTHER_SCHOOL_SENTINEL,
     }
 
 
@@ -207,7 +248,7 @@ async def patch_me_intake(
     profile.date_of_birth = body.date_of_birth
     profile.grad_program_focus = body.grad_program_focus
     attrs = dict(profile.attributes or {})
-    attrs["target_schools"] = body.target_schools
+    _merge_intake_profile_attributes(attrs, body)
     profile.attributes = attrs
     profile.intake_form_completed = True
 
@@ -253,7 +294,7 @@ async def patch_me_intake_draft(
     profile.grad_program_focus = body.grad_program_focus
 
     attrs = dict(profile.attributes or {})
-    attrs["target_schools"] = body.target_schools
+    _merge_intake_profile_attributes(attrs, body)
     attrs["intake_step_completed"] = max(int(attrs.get("intake_step_completed") or 0), 1)
     profile.attributes = attrs
 

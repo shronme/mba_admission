@@ -261,7 +261,7 @@ async def test_patch_intake_persists_target_schools(tmp_path: Path) -> None:
                 "country_of_residence": "United States",
                 "date_of_birth": "1992-06-01",
                 "grad_program_focus": "mba_full_time",
-                "target_schools": ["Harvard Business School", "Stanford Graduate School of Business"],
+                "target_schools": ["Harvard University", "Stanford University"],
             }
             r = await client.patch("/candidates/me/intake", headers=auth, json=body)
             assert r.status_code == 200, r.text
@@ -279,9 +279,121 @@ async def test_patch_intake_persists_target_schools(tmp_path: Path) -> None:
             schools_resp = await client.get("/candidates/intake/target-schools", headers=auth)
             assert schools_resp.status_code == 200, schools_resp.text
             payload = schools_resp.json()
-            assert "Harvard Business School" in payload["tier_1"]
+            combined = list(payload["tier_1"]) + list(payload["tier_2"])
+            assert "Harvard University" in combined
             assert isinstance(payload["tier_2"], list)
-            assert payload["max_selections"] == 24
+            assert payload["max_selections"] == 100
+            assert "programs_by_school" in payload
+            assert "Harvard University" in payload["programs_by_school"]
+            assert len(payload["programs_by_school"]["Harvard University"]) >= 1
+            assert payload.get("other_school_value") == "__intake_other__"
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_intake_draft_saves_other_school_and_program(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "intakeother@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            body = {
+                "full_name": "Pat Other",
+                "country_of_residence": "Canada",
+                "date_of_birth": "1994-01-15",
+                "grad_program_focus": "other_graduate",
+                "grad_program_focus_other": "Custom MSc program",
+                "target_schools": ["__intake_other__"],
+                "target_schools_other": "EPFL",
+            }
+            r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
+            assert r.status_code == 200, r.text
+            profile = r.json()["profile"]
+            assert profile["intake_form_completed"] is False
+            assert profile["attributes"]["target_schools"] == ["__intake_other__"]
+            assert profile["attributes"]["target_schools_other"] == "EPFL"
+            assert profile["attributes"]["grad_program_focus_other"] == "Custom MSc program"
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_intake_other_school_requires_description(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "intakeother2@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            body = {
+                "full_name": "Pat Other",
+                "country_of_residence": "Canada",
+                "date_of_birth": "1994-01-15",
+                "grad_program_focus": "mba_full_time",
+                "target_schools": ["__intake_other__"],
+                "target_schools_other": "   ",
+            }
+            r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
+            assert r.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_intake_other_program_requires_description(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "intakeother3@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            body = {
+                "full_name": "Pat Other",
+                "country_of_residence": "Canada",
+                "date_of_birth": "1994-01-15",
+                "grad_program_focus": "other_graduate",
+                "target_schools": ["Harvard University"],
+            }
+            r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
+            assert r.status_code == 422
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         await engine.dispose()

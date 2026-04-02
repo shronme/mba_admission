@@ -100,6 +100,10 @@ export type CandidateIntakePayload = {
   grad_program_focus: string;
   /** Canonical school names from the intake list (currently US business programs). */
   target_schools: string[];
+  /** Free text when the candidate selected the synthetic "Other" school row. */
+  target_schools_other?: string | null;
+  /** Free text when `grad_program_focus` is `other_graduate`. */
+  grad_program_focus_other?: string | null;
 };
 
 export type ProfileGapQuestionDto = {
@@ -395,6 +399,8 @@ export async function patchCandidateIntake(
       date_of_birth: body.date_of_birth,
       grad_program_focus: body.grad_program_focus,
       target_schools: body.target_schools,
+      target_schools_other: body.target_schools_other ?? null,
+      grad_program_focus_other: body.grad_program_focus_other ?? null,
     }),
   });
   const text = await res.text();
@@ -435,6 +441,8 @@ export async function patchCandidateIntakeDraft(
       date_of_birth: body.date_of_birth,
       grad_program_focus: body.grad_program_focus,
       target_schools: body.target_schools,
+      target_schools_other: body.target_schools_other ?? null,
+      grad_program_focus_other: body.grad_program_focus_other ?? null,
     }),
   });
   const text = await res.text();
@@ -554,11 +562,16 @@ export async function submitCandidateProfileAnswers(
   };
 }
 
-/** GET /candidates/intake/target-schools — curated lists for the intake form (authoritative). */
+/** GET /candidates/intake/target-schools — schools + per-school program slugs (catalog JSON). */
+export type IntakeProgramOffering = { slug: string; label: string };
+
 export type IntakeTargetSchoolsResponse = {
   tier_1: string[];
   tier_2: string[];
   max_selections: number;
+  programs_by_school: Record<string, IntakeProgramOffering[]>;
+  /** Value used for the synthetic "Other school" multi-select row (must match backend). */
+  other_school_value: string;
 };
 
 function parseIntakeTargetSchoolsPayload(data: unknown): IntakeTargetSchoolsResponse {
@@ -569,10 +582,32 @@ function parseIntakeTargetSchoolsPayload(data: unknown): IntakeTargetSchoolsResp
   if (!Array.isArray(o.tier_1) || !Array.isArray(o.tier_2) || typeof o.max_selections !== "number") {
     throw new Error("Invalid target schools payload shape");
   }
+  const rawPrograms = o.programs_by_school;
+  if (rawPrograms === null || typeof rawPrograms !== "object" || Array.isArray(rawPrograms)) {
+    throw new Error("Invalid target schools payload shape (programs_by_school)");
+  }
+  const programs_by_school: Record<string, IntakeProgramOffering[]> = {};
+  for (const [school, entries] of Object.entries(rawPrograms)) {
+    if (!Array.isArray(entries)) continue;
+    programs_by_school[school] = entries
+      .map((item) => {
+        const row = item as Record<string, unknown>;
+        return {
+          slug: String(row.slug ?? ""),
+          label: String(row.label ?? row.slug ?? ""),
+        };
+      })
+      .filter((x) => x.slug.length > 0);
+  }
+  const otherRaw = o.other_school_value;
+  const other_school_value =
+    typeof otherRaw === "string" && otherRaw.trim() ? otherRaw.trim() : "__intake_other__";
   return {
     tier_1: o.tier_1.map((x) => String(x)),
     tier_2: o.tier_2.map((x) => String(x)),
     max_selections: o.max_selections,
+    programs_by_school,
+    other_school_value,
   };
 }
 
