@@ -34,7 +34,11 @@ from app.db.enums import UserRole
 from app.db.models.admin import Admin
 from app.db.models.user import User
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("seed_admins")
 
 DEFAULT_ADMINS: list[tuple[str, str]] = [
@@ -55,13 +59,16 @@ async def main() -> None:
     else:
         admins_to_seed = DEFAULT_ADMINS
 
+    logger.info("Seeding %d admin account(s)", len(admins_to_seed))
+
     engine = create_async_engine(database_url, pool_pre_ping=True)
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     try:
         async with session_factory() as session:
-            for email, full_name in admins_to_seed:
+            for idx, (email, full_name) in enumerate(admins_to_seed, start=1):
                 email_norm = email.strip().lower()
+                logger.info("[%d/%d] processing %s", idx, len(admins_to_seed), email_norm)
 
                 existing_user = (
                     await session.execute(select(User).where(User.email == email_norm))

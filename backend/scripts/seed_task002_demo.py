@@ -51,7 +51,11 @@ from app.db.models.tasks import TaskItem
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.chat_repo import ChatRepository
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("seed_task002")
 
 
@@ -64,9 +68,10 @@ async def main() -> uuid.UUID:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
         async with session_factory() as session:
+            logger.info("Seeding demo candidate and related rows…")
             cid = await _seed(session)
             await session.commit()
-            logger.info("Seeded candidate id=%s", cid)
+            logger.info("Done. Seeded candidate id=%s", cid)
             return cid
     finally:
         await engine.dispose()
@@ -76,6 +81,7 @@ async def _seed(session: AsyncSession) -> uuid.UUID:
     c_repo = CandidateRepository(session)
     chat_repo = ChatRepository(session)
 
+    logger.info("Creating candidate and profile…")
     candidate = await c_repo.create_candidate(
         full_name="Jordan Park",
         email="jordan.park.demo@example.com",
@@ -94,6 +100,7 @@ async def _seed(session: AsyncSession) -> uuid.UUID:
         },
     )
 
+    logger.info("Creating chat thread and messages…")
     thread = await chat_repo.create_thread(
         candidate.id,
         title="Kickoff — goals & timeline",
@@ -112,6 +119,7 @@ async def _seed(session: AsyncSession) -> uuid.UUID:
         extra={"model_stub": "seed"},
     )
 
+    logger.info("Adding file, strategy, tasks, essay, AI run, audit…")
     session.add(
         UploadedFile(
             candidate_id=candidate.id,

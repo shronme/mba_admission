@@ -1,9 +1,17 @@
 import argparse
 import json
+import logging
 import sys
 import time
 import urllib.error
 import urllib.request
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("wiring_smoke_test")
 
 
 def http_request_json(method: str, url: str, body: dict | None = None) -> dict:
@@ -39,38 +47,44 @@ def main() -> int:
 
     enqueue_url = f"{args.base_url}/wiring/smoke"
     start = time.time()
+    logger.info("POST %s (enqueue smoke job)", enqueue_url)
 
     enqueue_payload = http_request_json("POST", enqueue_url, body={})
 
     job_id = enqueue_payload.get("job_id")
     if not job_id:
-        print(f"Unexpected enqueue response: {enqueue_payload}", file=sys.stderr)
+        logger.error("Unexpected enqueue response: %s", enqueue_payload)
         return 3
 
-    print(f"Enqueued wiring smoke job: {job_id}")
+    logger.info("Enqueued job_id=%s; polling every %.1fs (timeout %ds)", job_id, args.poll_interval_seconds, args.timeout_seconds)
 
     status_url = f"{args.base_url}/wiring/smoke/{job_id}"
     last_state = None
+    poll_n = 0
 
     while True:
-        if time.time() - start > args.timeout_seconds:
-            print("Timed out waiting for job to complete.", file=sys.stderr)
+        elapsed = time.time() - start
+        if elapsed > args.timeout_seconds:
+            logger.error("Timed out after %.1fs waiting for job to complete", elapsed)
             return 4
 
         status_payload = http_request_json("GET", status_url)
+        poll_n += 1
 
         state = status_payload.get("state")
         if state != last_state:
-            print(f"State: {state}")
+            logger.info("State: %s (elapsed %.1fs, poll #%d)", state, elapsed, poll_n)
             last_state = state
+        elif poll_n % 10 == 0:
+            logger.info("Still waiting: state=%s elapsed=%.1fs", state, elapsed)
 
         if state == "SUCCESS":
-            print("Job result:")
+            logger.info("Job finished successfully.")
             print(json.dumps(status_payload.get("result"), indent=2))
             return 0
 
         if state in {"FAILURE", "REVOKED"}:
-            print("Job failed:")
+            logger.error("Job ended in state=%s", state)
             print(json.dumps(status_payload.get("error") or status_payload, indent=2))
             return 6
 

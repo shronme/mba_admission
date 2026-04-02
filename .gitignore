@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .venv
+.env
 
 # Node / Next.js (apps/web)
 node_modules/
@@ -9,3 +10,4 @@ node_modules/
 out/
 *.tsbuildinfo
 .env*.local
+backend/data/*

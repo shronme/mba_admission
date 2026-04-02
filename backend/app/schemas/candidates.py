@@ -6,9 +6,10 @@ import uuid
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
 from app.constants.grad_program_focus import ALLOWED_GRAD_PROGRAM_FOCUS
+from app.constants.graduate_programs_catalog import INTAKE_OTHER_SCHOOL_SENTINEL, program_slugs_for_schools
 from app.constants.target_us_schools import (
     ALLOWED_TARGET_US_SCHOOLS,
     INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
@@ -75,7 +76,17 @@ class CandidateIntakeUpdate(BaseModel):
         ...,
         min_length=1,
         max_length=INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
-        description="US MBA programs under consideration (from the curated intake list).",
+        description="School names from the intake catalog, plus optional synthetic Other row.",
+    )
+    target_schools_other: str | None = Field(
+        default=None,
+        max_length=512,
+        description='Required when target_schools includes the synthetic "Other" token.',
+    )
+    grad_program_focus_other: str | None = Field(
+        default=None,
+        max_length=256,
+        description='Required when grad_program_focus is "other_graduate".',
     )
 
     @field_validator("grad_program_focus")
@@ -103,6 +114,38 @@ class CandidateIntakeUpdate(BaseModel):
         if not out:
             raise ValueError("Select at least one target school")
         return out
+
+    @model_validator(mode="after")
+    def intake_other_school_and_program_rules(self) -> CandidateIntakeUpdate:
+        sentinel = INTAKE_OTHER_SCHOOL_SENTINEL
+        has_other_school = sentinel in self.target_schools
+        catalog_schools = [s for s in self.target_schools if s != sentinel]
+
+        if not has_other_school and (self.target_schools_other or "").strip():
+            raise ValueError('Custom school text is only allowed when "Other" is selected.')
+
+        if has_other_school:
+            if not (self.target_schools_other or "").strip():
+                raise ValueError('Please describe your school when "Other" is selected.')
+
+        if self.grad_program_focus == "other_graduate":
+            if not (self.grad_program_focus_other or "").strip():
+                raise ValueError('Please describe your program when "Other program" is selected.')
+            return self
+
+        if not catalog_schools:
+            return self
+
+        offered = program_slugs_for_schools(catalog_schools)
+        if self.grad_program_focus in offered:
+            return self
+
+        if has_other_school:
+            raise ValueError(
+                "This program is not listed for your selected catalog schools. "
+                'Choose "Other program" and describe it, or change schools or program.'
+            )
+        raise ValueError("Selected program is not offered at any of your target schools")
 
     @field_validator("date_of_birth")
     @classmethod

@@ -24,9 +24,11 @@ def configure_dspy_from_env() -> None:
     (pure Python `dspy.Module.forward`) should be used.
 
     Env vars:
-    - `DSPY_MODE`: `mock` (default) or `openai`/`anthropic` (anything else means "try real")
+    - `DSPY_MODE`: `mock` (default), `perplexity` (skip bootstrap if LM already set; else same as
+      env Perplexity below), or other non-mock values for OpenAI-style bootstrap
     - `DSPY_MODEL`: e.g. `openai/gpt-4o-mini` (defaults to `openai/gpt-4o-mini`)
     - `OPENAI_API_KEY`: required for real OpenAI calls
+    - `PERPLEXITY_API_KEY`: required when `DSPY_MODEL` is a `perplexity/...` LiteLLM id
     """
 
     global _configured
@@ -35,9 +37,53 @@ def configure_dspy_from_env() -> None:
 
     mode = (os.getenv("DSPY_MODE") or "mock").lower()
     model = os.getenv("DSPY_MODEL") or "openai/gpt-4o-mini"
-    openai_key = os.getenv("OPENAI_API_KEY")
+    openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+    perplexity_key = (
+        (os.getenv("PERPLEXITY_API_KEY") or os.getenv("PERPLEXITYAI_API_KEY") or "")
+        .strip()
+    )
 
-    if mode == "mock" or not openai_key:
+    if mode == "mock":
+        logger.info("DSPy not configured for real LLM calls (DSPY_MODE=mock).")
+        _configured = True
+        return
+
+    # Batch tools (e.g. research_program_dossiers) call `dspy.configure(lm=...)` before this;
+    # do not replace that LM with OPENAI_API_KEY when the shell still has DSPY_MODE=openai.
+    if mode == "perplexity" and dspy.settings.lm is not None:
+        logger.info(
+            "DSPy env bootstrap skipped (DSPY_MODE=perplexity; LM already configured)."
+        )
+        _configured = True
+        return
+
+    if model.startswith("perplexity/"):
+        if not perplexity_key:
+            logger.info(
+                "DSPy not configured (DSPY_MODEL=%s but PERPLEXITY_API_KEY is unset).",
+                model,
+            )
+            _configured = True
+            return
+        base = (os.getenv("PERPLEXITY_BASE_URL") or os.getenv("PERPLEXITY_API_BASE") or "").strip()
+        try:
+            lm = (
+                dspy.LM(model, api_key=perplexity_key, api_base=base)
+                if base
+                else dspy.LM(model, api_key=perplexity_key)
+            )
+        except TypeError:
+            lm = (
+                dspy.LM(model, api_key=perplexity_key, base_url=base)
+                if base
+                else dspy.LM(model, api_key=perplexity_key)
+            )
+        dspy.configure(lm=lm)
+        logger.info("DSPy configured with model=%s (Perplexity)", model)
+        _configured = True
+        return
+
+    if not openai_key:
         logger.info(
             "DSPy not configured for real LLM calls (DSPY_MODE=%s, OPENAI_API_KEY set=%s).",
             mode,
@@ -46,7 +92,6 @@ def configure_dspy_from_env() -> None:
         _configured = True
         return
 
-    # For MVP we only support OpenAI via DSPy/LiteLLM right now.
     lm = dspy.LM(model, api_key=openai_key)
     dspy.configure(lm=lm)
     logger.info("DSPy configured with model=%s", model)

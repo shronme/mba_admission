@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { format } from "date-fns";
@@ -10,7 +10,7 @@ import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import type { SearchableOption } from "@/components/SearchableSelect";
 import { FinalQuestionsStep } from "@/components/FinalQuestionsStep";
-import type { CandidateDto } from "@/lib/api";
+import type { CandidateDto, CandidateIntakePayload } from "@/lib/api";
 import type { UploadedFileDto } from "@/lib/api";
 import {
   fetchIntakeTargetSchools,
@@ -22,28 +22,71 @@ import {
   uploadFileWithDocumentHint,
 } from "@/lib/api";
 import { COUNTRY_NAMES } from "@/data/countries";
-import { GRAD_PROGRAM_FOCUS_OPTIONS } from "@/data/gradProgramFocusOptions";
+import { gradProgramFocusLabel } from "@/data/gradProgramFocusOptions";
 
 import "react-day-picker/style.css";
 
 const COUNTRY_OPTIONS = COUNTRY_NAMES.map((name) => ({ value: name, label: name }));
 
-function buildIntakeSchoolOptions(primary: string[], secondary: string[]): SearchableOption[] {
-  const a = [...primary].sort((x, y) => x.localeCompare(y));
-  const b = [...secondary].sort((x, y) => x.localeCompare(y));
-  return [...a, ...b].map((name) => ({ value: name, label: name }));
+/** Must match `INTAKE_OTHER_SCHOOL_SENTINEL` in backend `graduate_programs_catalog.py`. */
+const FALLBACK_INTAKE_OTHER_SCHOOL = "__intake_other__";
+const INTAKE_OTHER_PROGRAM_SLUG = "other_graduate";
+
+function buildIntakeSchoolOptions(
+  primary: string[],
+  secondary: string[],
+  otherSchoolValue: string | null,
+): SearchableOption[] {
+  const ov = otherSchoolValue?.trim() || null;
+  const a = [...primary].filter((x) => x !== ov).sort((x, y) => x.localeCompare(y));
+  const b = [...secondary].filter((x) => x !== ov).sort((x, y) => x.localeCompare(y));
+  const core: SearchableOption[] = [...a, ...b].map((name) => ({ value: name, label: name }));
+  if (ov && (primary.includes(ov) || secondary.includes(ov))) {
+    core.push({ value: ov, label: "Other — not listed in catalog" });
+  }
+  return core;
 }
 
-function getTargetSchoolsLabel(programFocus: string) {
-  const p = programFocus.trim().toLowerCase();
-  if (!p) return "Schools you are considering";
-  if (/\bmba\b/.test(p) || p.includes("business administration")) {
-    return "Schools you are considering (US MBA programs)";
+function mergedTargetSchools(primary: string, extras: string[]): string[] {
+  const p = primary.trim();
+  const out: string[] = [];
+  const seen = new Set<string>();
+  if (p) {
+    out.push(p);
+    seen.add(p);
   }
-  if (p.includes("master in management") || /\bmim\b/.test(p)) {
-    return "Schools you are considering (US MiM programs)";
+  for (const x of extras) {
+    const s = x.trim();
+    if (!s || seen.has(s)) continue;
+    seen.add(s);
+    out.push(s);
   }
-  return "Schools you are considering (US graduate programs)";
+  return out;
+}
+
+function buildIntakeStep1Payload(
+  fullName: string,
+  country: string,
+  isoDob: string,
+  programFocus: string,
+  targetSchools: string[],
+  otherSchoolToken: string,
+  targetSchoolsOther: string,
+  gradProgramOther: string,
+): CandidateIntakePayload {
+  return {
+    full_name: fullName,
+    country_of_residence: country,
+    date_of_birth: isoDob,
+    grad_program_focus: programFocus,
+    target_schools: targetSchools,
+    target_schools_other:
+      otherSchoolToken && targetSchools.includes(otherSchoolToken)
+        ? targetSchoolsOther.trim() || null
+        : null,
+    grad_program_focus_other:
+      programFocus === INTAKE_OTHER_PROGRAM_SLUG ? gradProgramOther.trim() || null : null,
+  };
 }
 
 function pickLatestByDocType(
@@ -168,8 +211,15 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const [country, setCountry] = useState("");
   const [dob, setDob] = useState<Date | undefined>(undefined);
   const [programFocus, setProgramFocus] = useState("");
-  const [targetSchools, setTargetSchools] = useState<string[]>([]);
+  const [gradProgramOther, setGradProgramOther] = useState("");
+  const [primarySchool, setPrimarySchool] = useState("");
+  const [additionalTargetSchools, setAdditionalTargetSchools] = useState<string[]>([]);
+  const [targetSchoolsOther, setTargetSchoolsOther] = useState("");
+  const [intakeOtherSchoolToken, setIntakeOtherSchoolToken] = useState(FALLBACK_INTAKE_OTHER_SCHOOL);
   const [schoolOptions, setSchoolOptions] = useState<SearchableOption[]>([]);
+  const [programsBySchool, setProgramsBySchool] = useState<
+    Record<string, { slug: string; label: string }[]>
+  >({});
   const [maxSchoolSelections, setMaxSchoolSelections] = useState(24);
   const [schoolsLoading, setSchoolsLoading] = useState(true);
   const [schoolsLoadError, setSchoolsLoadError] = useState<string | null>(null);
@@ -203,6 +253,50 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     if (debugEnabled) console.debug("[intake]", ...args);
   };
 
+  const targetSchoolsForApi = useMemo(
+    () => mergedTargetSchools(primarySchool, additionalTargetSchools),
+    [primarySchool, additionalTargetSchools],
+  );
+
+  const programOptions: SearchableOption[] = useMemo(() => {
+    if (!primarySchool.trim()) return [];
+    const seen = new Set<string>();
+    const collected: SearchableOption[] = [];
+    if (primarySchool === intakeOtherSchoolToken) {
+      for (const progs of Object.values(programsBySchool)) {
+        for (const p of progs) {
+          if (!p.slug || seen.has(p.slug)) continue;
+          seen.add(p.slug);
+          collected.push({ value: p.slug, label: p.label || p.slug });
+        }
+      }
+    } else {
+      for (const p of programsBySchool[primarySchool] ?? []) {
+        if (!p.slug || seen.has(p.slug)) continue;
+        seen.add(p.slug);
+        collected.push({ value: p.slug, label: p.label || p.slug });
+      }
+    }
+    collected.sort((a, b) => a.label.localeCompare(b.label));
+    if (!seen.has(INTAKE_OTHER_PROGRAM_SLUG)) {
+      collected.push({ value: INTAKE_OTHER_PROGRAM_SLUG, label: "Other — describe your program" });
+    }
+    return collected;
+  }, [programsBySchool, primarySchool, intakeOtherSchoolToken]);
+
+  useEffect(() => {
+    if (!primarySchool.trim() || !programFocus) return;
+    if (Object.keys(programsBySchool).length === 0) return;
+    if (programFocus === INTAKE_OTHER_PROGRAM_SLUG) return;
+    if (primarySchool === intakeOtherSchoolToken) return;
+    const ok = (programsBySchool[primarySchool] ?? []).some((p) => p.slug === programFocus);
+    if (!ok) setProgramFocus("");
+  }, [primarySchool, programFocus, programsBySchool, intakeOtherSchoolToken]);
+
+  const additionalSchoolOptions = useMemo(() => {
+    return schoolOptions.filter((o) => o.value !== primarySchool && o.value !== intakeOtherSchoolToken);
+  }, [schoolOptions, primarySchool, intakeOtherSchoolToken]);
+
   const firstName = fullName.trim().split(/\s+/)[0] || "there";
   const initials = fullName
     .trim()
@@ -220,8 +314,11 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       try {
         const data = await fetchIntakeTargetSchools(sessionToken);
         if (cancelled) return;
-        setSchoolOptions(buildIntakeSchoolOptions(data.tier_1, data.tier_2));
+        const otherTok = data.other_school_value?.trim() || FALLBACK_INTAKE_OTHER_SCHOOL;
+        setIntakeOtherSchoolToken(otherTok);
+        setSchoolOptions(buildIntakeSchoolOptions(data.tier_1, data.tier_2, otherTok));
         setMaxSchoolSelections(data.max_selections);
+        setProgramsBySchool(data.programs_by_school);
       } catch (e) {
         if (!cancelled) setSchoolsLoadError(String(e));
       } finally {
@@ -246,7 +343,14 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
         if (p?.grad_program_focus) setProgramFocus(p.grad_program_focus);
         const attrs = p?.attributes ?? null;
         const schools = Array.isArray((attrs as any)?.target_schools) ? ((attrs as any).target_schools as string[]) : [];
-        if (schools.length) setTargetSchools(schools);
+        if (schools.length) {
+          setPrimarySchool(String(schools[0] ?? ""));
+          setAdditionalTargetSchools(schools.slice(1).map(String));
+        }
+        const tso = (attrs as any)?.target_schools_other;
+        if (typeof tso === "string" && tso.trim()) setTargetSchoolsOther(tso);
+        const gpo = (attrs as any)?.grad_program_focus_other;
+        if (typeof gpo === "string" && gpo.trim()) setGradProgramOther(gpo);
         const step = Number((attrs as any)?.intake_step_completed ?? 0);
         const stepCompleted = (step === 1 || step === 2 || step === 3 || step === 4 ? step : 0) as
           | 0
@@ -256,7 +360,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
           | 4;
         debug("profile hydration", {
           intake_step_completed: stepCompleted,
-          has_target_schools: Boolean(schools.length),
+          has_target_schools: schools.length > 0,
         });
         setMaxStepCompleted((prev) => (prev < stepCompleted ? stepCompleted : prev));
         if (stepCompleted >= 1) {
@@ -488,16 +592,28 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       return false;
     }
     if (!programFocus) {
-      setError("Please select the program you are targeting.");
+      setError("Please select a program for your target school.");
       return false;
     }
     if (!dob) {
       setError("Please select your date of birth.");
       return false;
     }
-    if (targetSchools.length === 0) {
-      setError("Please select at least one school you are considering.");
+    if (!primarySchool.trim()) {
+      setError("Please select your target school.");
       return false;
+    }
+    if (intakeOtherSchoolToken && primarySchool === intakeOtherSchoolToken) {
+      if (!targetSchoolsOther.trim()) {
+        setError('Please describe your school when "Other" is selected.');
+        return false;
+      }
+    }
+    if (programFocus === INTAKE_OTHER_PROGRAM_SLUG) {
+      if (!gradProgramOther.trim()) {
+        setError('Please describe your program when "Other program" is selected.');
+        return false;
+      }
     }
     return true;
   };
@@ -540,13 +656,19 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       const isoDob = format(dob!, "yyyy-MM-dd");
       setBusy(true);
       try {
-        await patchCandidateIntakeDraft(sessionToken, {
-          full_name: fullName,
-          country_of_residence: country,
-          date_of_birth: isoDob,
-          grad_program_focus: programFocus,
-          target_schools: targetSchools,
-        });
+        await patchCandidateIntakeDraft(
+          sessionToken,
+          buildIntakeStep1Payload(
+            fullName,
+            country,
+            isoDob,
+            programFocus,
+            targetSchoolsForApi,
+            intakeOtherSchoolToken,
+            targetSchoolsOther,
+            gradProgramOther,
+          ),
+        );
         setMaxStepCompleted((prev) => (prev < 1 ? 1 : prev));
         setCurrentStep(2);
       } catch (err) {
@@ -635,13 +757,19 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
         }
         setBusy(true);
         try {
-          await patchCandidateIntake(sessionToken, {
-            full_name: fullName,
-            country_of_residence: country,
-            date_of_birth: isoDob,
-            grad_program_focus: programFocus,
-            target_schools: targetSchools,
-          });
+          await patchCandidateIntake(
+            sessionToken,
+            buildIntakeStep1Payload(
+              fullName,
+              country,
+              isoDob,
+              programFocus,
+              targetSchoolsForApi,
+              intakeOtherSchoolToken,
+              targetSchoolsOther,
+              gradProgramOther,
+            ),
+          );
           setMaxStepCompleted(3);
           setCurrentStep(4);
         } finally {
@@ -695,13 +823,19 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       try {
         // Keep CV upload best-effort; backend can de-dupe if it already exists.
         if (cvFile) await uploadFileWithDocumentHint(sessionToken, cvFile, "cv");
-        await patchCandidateIntake(sessionToken, {
-          full_name: fullName,
-          country_of_residence: country,
-          date_of_birth: isoDob,
-          grad_program_focus: programFocus,
-          target_schools: targetSchools,
-        });
+        await patchCandidateIntake(
+          sessionToken,
+          buildIntakeStep1Payload(
+            fullName,
+            country,
+            isoDob,
+            programFocus,
+            targetSchoolsForApi,
+            intakeOtherSchoolToken,
+            targetSchoolsOther,
+            gradProgramOther,
+          ),
+        );
         setMaxStepCompleted(3);
         setCurrentStep(4);
       } finally {
@@ -992,21 +1126,44 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
 
                           <div className="mt-5">
                             <SearchableSelect
-                              id="intake-program"
-                              label="Program you are targeting"
-                              options={GRAD_PROGRAM_FOCUS_OPTIONS}
-                              value={programFocus}
+                              id="intake-primary-school"
+                              label="Target school"
+                              options={schoolOptions}
+                              value={primarySchool}
                               onChange={(v) => {
-                                setProgramFocus(v);
-                                setError((prev) =>
-                                  prev === "Please select the program you are targeting." ? null : prev,
-                                );
+                                setPrimarySchool(v);
+                                setProgramFocus("");
+                                setGradProgramOther("");
+                                if (v !== intakeOtherSchoolToken) setTargetSchoolsOther("");
+                                setAdditionalTargetSchools((prev) => prev.filter((x) => x !== v));
+                                setError((prev) => (prev === "Please select your target school." ? null : prev));
                               }}
-                              disabled={busy}
-                              placeholder="Search programs (MBA, PhD, MS, …)"
-                              emptyMessage="No program matches"
+                              disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                              placeholder={schoolsLoading ? "Loading schools…" : "Search schools…"}
+                              emptyMessage="No school matches"
                               maxVisible={200}
                             />
+                            {intakeOtherSchoolToken && primarySchool === intakeOtherSchoolToken ? (
+                              <div className="mt-3">
+                                <label htmlFor="intake-school-other" className={labelClass}>
+                                  School name(s) not in the list
+                                </label>
+                                <textarea
+                                  id="intake-school-other"
+                                  value={targetSchoolsOther}
+                                  onChange={(e) => {
+                                    setTargetSchoolsOther(e.target.value);
+                                    setError((prev) =>
+                                      prev === 'Please describe your school when "Other" is selected.' ? null : prev,
+                                    );
+                                  }}
+                                  disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                                  rows={3}
+                                  placeholder="e.g. London Business School"
+                                  className={`${fieldShell} min-h-[5rem] resize-y`}
+                                />
+                              </div>
+                            ) : null}
                           </div>
 
                           {schoolsLoadError ? (
@@ -1014,25 +1171,72 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                               Could not load school list: {schoolsLoadError}
                             </p>
                           ) : null}
-                          <div className="mt-5">
-                            <SearchableMultiSelect
-                              id="intake-schools"
-                              label={getTargetSchoolsLabel(programFocus)}
-                              options={schoolOptions}
-                              values={targetSchools}
-                              onChange={(v) => {
-                                setTargetSchools(v);
-                                setError((prev) =>
-                                  prev === "Please select at least one school you are considering." ? null : prev,
-                                );
-                              }}
-                              disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
-                              placeholder={schoolsLoading ? "Loading schools…" : "Search schools to add…"}
-                              emptyMessage="No school matches"
-                              maxVisible={200}
-                              maxSelections={maxSchoolSelections}
-                            />
-                          </div>
+
+                          {primarySchool.trim() ? (
+                            <div className="mt-5">
+                              <SearchableSelect
+                                id="intake-program"
+                                label="Program at this school"
+                                options={programOptions}
+                                value={programFocus}
+                                onChange={(v) => {
+                                  setProgramFocus(v);
+                                  if (v !== INTAKE_OTHER_PROGRAM_SLUG) setGradProgramOther("");
+                                  setError((prev) =>
+                                    prev === "Please select a program for your target school." ? null : prev,
+                                  );
+                                }}
+                                disabled={
+                                  busy || schoolsLoading || Boolean(schoolsLoadError) || programOptions.length === 0
+                                }
+                                placeholder="Search programs for this school…"
+                                emptyMessage="No program matches"
+                                maxVisible={200}
+                              />
+                              {programFocus === INTAKE_OTHER_PROGRAM_SLUG ? (
+                                <div className="mt-3">
+                                  <label htmlFor="intake-program-other" className={labelClass}>
+                                    Describe your program
+                                  </label>
+                                  <textarea
+                                    id="intake-program-other"
+                                    value={gradProgramOther}
+                                    onChange={(e) => {
+                                      setGradProgramOther(e.target.value);
+                                      setError((prev) =>
+                                        prev === 'Please describe your program when "Other program" is selected.'
+                                          ? null
+                                          : prev,
+                                      );
+                                    }}
+                                    disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                                    rows={3}
+                                    placeholder="e.g. MSc in Human–Computer Interaction"
+                                    className={`${fieldShell} min-h-[5rem] resize-y`}
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : null}
+
+                          {primarySchool.trim() && maxSchoolSelections > 1 ? (
+                            <div className="mt-5">
+                              <SearchableMultiSelect
+                                id="intake-additional-schools"
+                                label="Additional schools (optional)"
+                                options={additionalSchoolOptions}
+                                values={additionalTargetSchools}
+                                onChange={(v) =>
+                                  setAdditionalTargetSchools(v.filter((x) => x !== primarySchool))
+                                }
+                                disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                                placeholder="Add more schools…"
+                                emptyMessage="No school matches"
+                                maxVisible={200}
+                                maxSelections={Math.max(0, maxSchoolSelections - 1)}
+                              />
+                            </div>
+                          ) : null}
                         </div>
 
                         {error ? (
@@ -1043,7 +1247,14 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                         <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:items-center sm:gap-6">
                           <button
                             type="submit"
-                            disabled={busy || schoolsLoading || Boolean(schoolsLoadError) || schoolOptions.length === 0}
+                            disabled={
+                              busy ||
+                              schoolsLoading ||
+                              Boolean(schoolsLoadError) ||
+                              schoolOptions.length === 0 ||
+                              !primarySchool.trim() ||
+                              programOptions.length === 0
+                            }
                             className="group/btn flex w-full items-center justify-center gap-3 rounded-lg bg-accent px-8 py-4 text-sm font-bold text-brand-900 shadow-xl shadow-accent/20 transition-transform hover:scale-[1.02] disabled:opacity-50 sm:w-auto"
                           >
                             Continue
@@ -1054,8 +1265,17 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                     ) : (
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-5 py-4">
                         <p className="text-sm text-brand-200/90">
-                          Completed: {country || "—"}, {programFocus || "—"}, {targetSchools.length} school
-                          {targetSchools.length === 1 ? "" : "s"}
+                          Completed: {country || "—"},{" "}
+                          {programFocus === INTAKE_OTHER_PROGRAM_SLUG
+                            ? gradProgramOther.trim() || "Other program"
+                            : gradProgramFocusLabel(programFocus) || programFocus || "—"}
+                          , {targetSchoolsForApi.length} school
+                          {targetSchoolsForApi.length === 1 ? "" : "s"}
+                          {intakeOtherSchoolToken && targetSchoolsForApi.includes(intakeOtherSchoolToken)
+                            ? targetSchoolsOther.trim()
+                              ? ` (incl. other: ${targetSchoolsOther.trim()})`
+                              : " (incl. other)"
+                            : ""}
                         </p>
                           {canEditStep(1) ? (
                           <button
