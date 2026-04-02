@@ -12,6 +12,18 @@ from app.core.config import settings
 from app.core.db import get_db_session
 from app.main import app
 import app.core.storage as storage_module
+from app.workers.tasks.document_processing import process_uploaded_document
+
+
+@pytest.fixture(autouse=True)
+def _skip_document_processing_queue(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Uploads enqueue Celery on the shared broker; the worker container cannot read
+    pytest's LOCAL_STORAGE_DIR (tmp_path). These tests only assert API/auth behaviour,
+    not background extraction — avoid cross-service FileNotFoundError noise.
+    """
+
+    monkeypatch.setattr(process_uploaded_document, "delay", lambda *_a, **_kw: None)
 
 
 @pytest.mark.asyncio

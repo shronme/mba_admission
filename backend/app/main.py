@@ -13,6 +13,7 @@ from starlette.staticfiles import StaticFiles
 from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.candidates_enter import router as candidates_enter_router
+from app.api.routes.chat import router as chat_router
 from app.api.routes.files import router as files_router
 from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
@@ -114,6 +115,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(candidates_enter_router)
+    app.include_router(chat_router)
     app.include_router(files_router)
     app.include_router(jobs_router)
     app.include_router(wiring_smoke_router)

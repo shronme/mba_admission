@@ -30,7 +30,7 @@ def test_run_profile_agent_does_not_mark_complete_with_missing_required_fields(m
             synthesized_attributes_json=json.dumps({}, ensure_ascii=False),
         )
 
-    monkeypatch.setattr("app.dspy.profile_agent.run_dspy_module", _fake_run)
+    monkeypatch.setattr("app.core.dspy_runtime.run_dspy_module", _fake_run)
 
     is_complete, gaps, _, score = run_profile_agent(attrs, use_openai=True, min_score=0)
 
@@ -51,7 +51,7 @@ def test_run_profile_agent_caps_score_to_structural_progress(monkeypatch) -> Non
             synthesized_attributes_json=json.dumps({}, ensure_ascii=False),
         )
 
-    monkeypatch.setattr("app.dspy.profile_agent.run_dspy_module", _fake_run)
+    monkeypatch.setattr("app.core.dspy_runtime.run_dspy_module", _fake_run)
 
     _, _, _, score = run_profile_agent(attrs, use_openai=True, min_score=0)
 
