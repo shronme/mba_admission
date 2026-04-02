@@ -85,7 +85,6 @@ _CV_KEYWORDS: dict[str, list[str]] = {
     "domain_base": ["government", "public sector", "military", "ngo", "finance", "technology", "consulting", "healthcare"],
     "core_strengths": ["led", "managed", "built", "launched", "delivered", "drove", "achieved", "implemented"],
     "transferable_assets": ["strategic", "cross-functional", "stakeholder", "p&l", "budget", "team", "program"],
-    "risks": ["gap", "pivot", "change"],
 }
 
 _LIFE_STORY_KEYWORDS: dict[str, list[str]] = {
