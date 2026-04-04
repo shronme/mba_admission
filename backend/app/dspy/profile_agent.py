@@ -320,14 +320,20 @@ def run_profile_agent(
         # Fallback: proportion of filled candidate-input attributes.
         score = max(min_score, structural_max_score) if min_score <= structural_max_score else structural_max_score
 
+    allowed_gap_keys = set(CANDIDATE_INPUT_ATTRIBUTES)
     try:
-        gaps: list[str] = json.loads(getattr(pred, "gaps_json", "[]") or "[]")
-        if not isinstance(gaps, list):
-            gaps = []
+        raw_model_gaps: list[str] = json.loads(getattr(pred, "gaps_json", "[]") or "[]")
+        if not isinstance(raw_model_gaps, list):
+            raw_model_gaps = []
     except (json.JSONDecodeError, ValueError):
-        gaps = get_profile_gaps(attributes)
+        raw_model_gaps = get_profile_gaps(attributes)
 
-    gaps = sorted(set(structural_gaps).union(gaps))
+    # Ignore gap keys outside the 8 candidate-input attributes. The schema includes
+    # extra keys (e.g. target_programs); the LLM sometimes lists those as "gaps" even
+    # though step-4 questions are only generated for CANDIDATE_INPUT_ATTRIBUTES.
+    # That produced profile_complete=false with missing=[] and trapped the UI.
+    model_gaps = [g for g in raw_model_gaps if isinstance(g, str) and g in allowed_gap_keys]
+    gaps = sorted(set(structural_gaps).union(model_gaps))
 
     # Make "complete" deterministic: required-attribute presence + gaps are the source of truth.
     # Some model outputs can mistakenly report score=100 with is_complete=false;

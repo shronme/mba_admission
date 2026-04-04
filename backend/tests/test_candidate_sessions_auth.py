@@ -260,19 +260,27 @@ async def test_patch_intake_persists_target_schools(tmp_path: Path) -> None:
                 "full_name": "Pat Example",
                 "country_of_residence": "United States",
                 "date_of_birth": "1992-06-01",
-                "grad_program_focus": "mba_full_time",
-                "target_schools": ["Harvard University", "Stanford University"],
+                "school_program_selections": [
+                    {"school": "Harvard University", "school_other": None, "program_slug": "mba_full_time", "program_other": None},
+                    {"school": "Stanford University", "school_other": None, "program_slug": "mba_full_time", "program_other": None},
+                ],
             }
             r = await client.patch("/candidates/me/intake", headers=auth, json=body)
             assert r.status_code == 200, r.text
             profile = r.json()["profile"]
             assert profile["intake_form_completed"] is True
-            assert profile["attributes"]["target_schools"] == body["target_schools"]
+            assert profile["attributes"]["target_schools"] == ["Harvard University", "Stanford University"]
+            assert len(profile["attributes"]["school_program_selections"]) == 2
 
             bad = await client.patch(
                 "/candidates/me/intake",
                 headers=auth,
-                json={**body, "target_schools": ["Not A Real B-School"]},
+                json={
+                    **body,
+                    "school_program_selections": [
+                        {"school": "Not A Real B-School", "school_other": None, "program_slug": "mba_full_time", "program_other": None}
+                    ],
+                },
             )
             assert bad.status_code == 422
 
@@ -315,10 +323,14 @@ async def test_patch_intake_draft_saves_other_school_and_program(tmp_path: Path)
                 "full_name": "Pat Other",
                 "country_of_residence": "Canada",
                 "date_of_birth": "1994-01-15",
-                "grad_program_focus": "other_graduate",
-                "grad_program_focus_other": "Custom MSc program",
-                "target_schools": ["__intake_other__"],
-                "target_schools_other": "EPFL",
+                "school_program_selections": [
+                    {
+                        "school": "__intake_other__",
+                        "school_other": "EPFL",
+                        "program_slug": "other_graduate",
+                        "program_other": "Custom MSc program",
+                    }
+                ],
             }
             r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
             assert r.status_code == 200, r.text
@@ -327,6 +339,7 @@ async def test_patch_intake_draft_saves_other_school_and_program(tmp_path: Path)
             assert profile["attributes"]["target_schools"] == ["__intake_other__"]
             assert profile["attributes"]["target_schools_other"] == "EPFL"
             assert profile["attributes"]["grad_program_focus_other"] == "Custom MSc program"
+            assert len(profile["attributes"]["school_program_selections"]) == 1
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         await engine.dispose()
@@ -355,12 +368,65 @@ async def test_patch_intake_other_school_requires_description(tmp_path: Path) ->
                 "full_name": "Pat Other",
                 "country_of_residence": "Canada",
                 "date_of_birth": "1994-01-15",
-                "grad_program_focus": "mba_full_time",
-                "target_schools": ["__intake_other__"],
-                "target_schools_other": "   ",
+                "school_program_selections": [
+                    {
+                        "school": "__intake_other__",
+                        "school_other": "   ",
+                        "program_slug": "mba_full_time",
+                        "program_other": None,
+                    }
+                ],
             }
             r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
             assert r.status_code == 422
+    finally:
+        app.dependency_overrides.pop(get_db_session, None)
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_patch_intake_draft_saves_test_scores(tmp_path: Path) -> None:
+    storage_module._BACKEND = None
+    os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
+
+    engine = create_async_engine(settings.database_url, pool_pre_ping=True)
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def override_get_db_session():
+        async with sessionmaker() as session:
+            yield session
+
+    app.dependency_overrides[get_db_session] = override_get_db_session
+
+    transport = httpx.ASGITransport(app=app)
+    try:
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            cand = await _enter_candidate(client, "intakescores@example.com")
+            auth = {"Authorization": f"Bearer {cand['session_token']}"}
+            body = {
+                "full_name": "Pat Scores",
+                "country_of_residence": "India",
+                "date_of_birth": "1995-03-20",
+                "school_program_selections": [
+                    {"school": "Harvard University", "school_other": None, "program_slug": "mba_full_time", "program_other": None}
+                ],
+                "intake_test_scores": {
+                    "scores_not_final_yet": False,
+                    "gmat_total": 705,
+                    "gre_verbal": None,
+                    "gre_quant": None,
+                    "ea_total": None,
+                    "gre_waived": False,
+                    "toefl_total": 110,
+                    "ielts_overall": None,
+                    "native_english_speaker": False,
+                },
+            }
+            r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
+            assert r.status_code == 200, r.text
+            scores = r.json()["profile"]["attributes"]["intake_test_scores"]
+            assert scores["gmat_total"] == 705
+            assert scores["toefl_total"] == 110
     finally:
         app.dependency_overrides.pop(get_db_session, None)
         await engine.dispose()
@@ -389,8 +455,9 @@ async def test_patch_intake_other_program_requires_description(tmp_path: Path) -
                 "full_name": "Pat Other",
                 "country_of_residence": "Canada",
                 "date_of_birth": "1994-01-15",
-                "grad_program_focus": "other_graduate",
-                "target_schools": ["Harvard University"],
+                "school_program_selections": [
+                    {"school": "Harvard University", "school_other": None, "program_slug": "other_graduate", "program_other": None}
+                ],
             }
             r = await client.patch("/candidates/me/intake/draft", headers=auth, json=body)
             assert r.status_code == 422

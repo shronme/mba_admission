@@ -14,6 +14,7 @@ from app.constants.target_us_schools import (
     ALLOWED_TARGET_US_SCHOOLS,
     INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
 )
+from app.schemas.intake_test_scores import IntakeTestScores
 
 
 class CandidateEnterRequest(BaseModel):
@@ -63,6 +64,17 @@ class CandidateEnterResponse(BaseModel):
     session_token: str
 
 
+class IntakeSchoolProgramSelection(BaseModel):
+    """A single (school, program) target selection from the intake catalog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    school: str = Field(..., min_length=1, max_length=256)
+    school_other: str | None = Field(default=None, max_length=512)
+    program_slug: str = Field(..., min_length=1, max_length=128)
+    program_other: str | None = Field(default=None, max_length=256)
+
+
 class CandidateIntakeUpdate(BaseModel):
     """First-login demographic intake (stored on User + Candidate + CandidateProfile)."""
 
@@ -71,28 +83,28 @@ class CandidateIntakeUpdate(BaseModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     country_of_residence: str = Field(..., min_length=1, max_length=128)
     date_of_birth: date
-    grad_program_focus: str = Field(..., min_length=1, max_length=128)
-    target_schools: list[str] = Field(
+    # New canonical intake representation: up to 4 (school, program) pairs.
+    school_program_selections: list[IntakeSchoolProgramSelection] = Field(
         ...,
         min_length=1,
-        max_length=INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS,
-        description="School names from the intake catalog, plus optional synthetic Other row.",
+        max_length=4,
+        description="Up to 4 (school, program) selections. First entry drives program_type.",
     )
-    target_schools_other: str | None = Field(
-        default=None,
-        max_length=512,
-        description='Required when target_schools includes the synthetic "Other" token.',
-    )
-    grad_program_focus_other: str | None = Field(
-        default=None,
-        max_length=256,
-        description='Required when grad_program_focus is "other_graduate".',
-    )
+
+    # Derived/legacy fields used internally by routes + DB mapping.
+    # Keep these for backward compatibility and for downstream code that expects them.
+    grad_program_focus: str = Field(default="", min_length=0, max_length=128)
+    target_schools: list[str] = Field(default_factory=list, max_length=INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS)
+    target_schools_other: str | None = Field(default=None, max_length=512)
+    grad_program_focus_other: str | None = Field(default=None, max_length=256)
+    intake_test_scores: IntakeTestScores | None = None
 
     @field_validator("grad_program_focus")
     @classmethod
     def grad_program_focus_allowed(cls, v: str) -> str:
         key = v.strip()
+        if not key:
+            return ""
         if key not in ALLOWED_GRAD_PROGRAM_FOCUS:
             raise ValueError("Invalid program selection")
         return key
@@ -111,41 +123,78 @@ class CandidateIntakeUpdate(BaseModel):
             if name not in seen:
                 seen.add(name)
                 out.append(name)
-        if not out:
-            raise ValueError("Select at least one target school")
         return out
 
     @model_validator(mode="after")
-    def intake_other_school_and_program_rules(self) -> CandidateIntakeUpdate:
+    def derive_and_validate_from_pairs(self) -> CandidateIntakeUpdate:
         sentinel = INTAKE_OTHER_SCHOOL_SENTINEL
-        has_other_school = sentinel in self.target_schools
-        catalog_schools = [s for s in self.target_schools if s != sentinel]
+        if not self.school_program_selections:
+            raise ValueError("Select at least one school")
 
-        if not has_other_school and (self.target_schools_other or "").strip():
-            raise ValueError('Custom school text is only allowed when "Other" is selected.')
+        # Normalize + validate each selection.
+        normalized: list[IntakeSchoolProgramSelection] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        target_schools: list[str] = []
+        any_other_school_text: str | None = None
 
-        if has_other_school:
-            if not (self.target_schools_other or "").strip():
-                raise ValueError('Please describe your school when "Other" is selected.')
+        for sel in self.school_program_selections:
+            school = sel.school.strip()
+            if school not in ALLOWED_TARGET_US_SCHOOLS:
+                raise ValueError("Invalid or unsupported school selection")
 
-        if self.grad_program_focus == "other_graduate":
-            if not (self.grad_program_focus_other or "").strip():
-                raise ValueError('Please describe your program when "Other program" is selected.')
-            return self
+            school_other = (sel.school_other or "").strip() or None
+            if school == sentinel:
+                if not school_other:
+                    raise ValueError('Please describe your school when "Other" is selected.')
+                if any_other_school_text is None:
+                    any_other_school_text = school_other
+            else:
+                if school_other:
+                    raise ValueError('Custom school text is only allowed when "Other" is selected.')
 
-        if not catalog_schools:
-            return self
+            program_slug = sel.program_slug.strip()
+            if program_slug not in ALLOWED_GRAD_PROGRAM_FOCUS:
+                raise ValueError("Invalid program selection")
 
-        offered = program_slugs_for_schools(catalog_schools)
-        if self.grad_program_focus in offered:
-            return self
+            program_other = (sel.program_other or "").strip() or None
+            if program_slug == "other_graduate":
+                if not program_other:
+                    raise ValueError('Please describe your program when "Other program" is selected.')
+            else:
+                if program_other:
+                    raise ValueError('Custom program text is only allowed when "Other program" is selected.')
 
-        if has_other_school:
-            raise ValueError(
-                "This program is not listed for your selected catalog schools. "
-                'Choose "Other program" and describe it, or change schools or program.'
+            # Catalog offer check when both school + program are catalog-defined.
+            if school != sentinel and program_slug != "other_graduate":
+                offered = program_slugs_for_schools([school])
+                if program_slug not in offered:
+                    raise ValueError("Selected program is not offered at the selected school")
+
+            key = (school, program_slug)
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            normalized.append(
+                IntakeSchoolProgramSelection(
+                    school=school,
+                    school_other=school_other,
+                    program_slug=program_slug,
+                    program_other=program_other,
+                )
             )
-        raise ValueError("Selected program is not offered at any of your target schools")
+            if school not in target_schools:
+                target_schools.append(school)
+
+        if not normalized:
+            raise ValueError("Select at least one school")
+
+        # Derived fields: first selection drives program_type + legacy fields.
+        self.school_program_selections = normalized
+        self.target_schools = target_schools
+        self.target_schools_other = any_other_school_text
+        self.grad_program_focus = normalized[0].program_slug
+        self.grad_program_focus_other = normalized[0].program_other if normalized[0].program_slug == "other_graduate" else None
+        return self
 
     @field_validator("date_of_birth")
     @classmethod

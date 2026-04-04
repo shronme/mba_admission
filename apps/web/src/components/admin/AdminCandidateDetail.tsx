@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useSession } from "@/context/SessionContext";
@@ -9,6 +9,7 @@ import {
   adminUploadFiles,
   type AdminFileDto,
 } from "@/lib/api";
+import { AdmissionEvaluationReadOnly } from "@/components/AdmissionEvaluationPanel";
 import { ProfileView } from "./ProfileView";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -86,6 +87,8 @@ type Props = {
   onBack: () => void;
 };
 
+type AdminDetailTab = "profile" | "school_evaluation";
+
 export function AdminCandidateDetail({ candidateId, onBack }: Props) {
   const { session } = useSession();
   const queryClient = useQueryClient();
@@ -93,6 +96,11 @@ export function AdminCandidateDetail({ candidateId, onBack }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminDetailTab>("profile");
+
+  useEffect(() => {
+    setActiveTab("profile");
+  }, [candidateId]);
 
   const { data: candidate, isLoading, error } = useQuery({
     queryKey: ["admin-candidate", candidateId],
@@ -158,10 +166,44 @@ export function AdminCandidateDetail({ candidateId, onBack }: Props) {
       )}
 
       {candidate && (
-        <div className="flex flex-1 gap-0 overflow-hidden">
-          {/* Left — Profile */}
+        <div className="flex flex-1 flex-col gap-0 overflow-hidden">
+          <div className="shrink-0 border-b border-neutral-200 bg-white px-6 py-3">
+            <nav className="flex gap-1" aria-label="Candidate detail sections">
+              <button
+                type="button"
+                onClick={() => setActiveTab("profile")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "profile"
+                    ? "bg-slate-900 text-white"
+                    : "text-neutral-600 hover:bg-neutral-100"
+                }`}
+              >
+                Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("school_evaluation")}
+                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "school_evaluation"
+                    ? "bg-slate-900 text-white"
+                    : "text-neutral-600 hover:bg-neutral-100"
+                }`}
+              >
+                School evaluation
+              </button>
+            </nav>
+          </div>
+
+          <div className="flex min-h-0 flex-1 gap-0 overflow-hidden">
+          {/* Left — Profile or evaluation */}
           <div className="flex-1 overflow-y-auto p-6">
-            <ProfileView profile={candidate.profile} />
+            {activeTab === "profile" ? (
+              <ProfileView profile={candidate.profile} />
+            ) : (
+              <AdmissionEvaluationReadOnly
+                attributes={(candidate.profile?.attributes ?? {}) as Record<string, unknown>}
+              />
+            )}
           </div>
 
           {/* Right — Files */}
@@ -212,6 +254,7 @@ export function AdminCandidateDetail({ candidateId, onBack }: Props) {
                 <FileRow key={f.id} file={f} />
               ))}
             </div>
+          </div>
           </div>
         </div>
       )}

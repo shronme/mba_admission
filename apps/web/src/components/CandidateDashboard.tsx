@@ -1,24 +1,36 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import { AdmissionEvaluationPanel } from "@/components/AdmissionEvaluationPanel";
 import { CandidateIntakeForm } from "@/components/CandidateIntakeForm";
+import { CandidateStitchShell, candidateInitials } from "@/components/CandidateStitchShell";
 import { useSession } from "@/context/SessionContext";
+import type { CandidateDto } from "@/lib/api";
 import { fetchCandidateProfile } from "@/lib/api";
-import { SidebarDocuments } from "@/components/SidebarDocuments";
-import { StageProgressBar } from "@/components/StageProgressBar";
 
 
 export function CandidateDashboard() {
   const { session, setSession, signOut } = useSession();
-  const [currentStage, setCurrentStage] = useState(1);
   const [activeTab, setActiveTab] = useState<"dashboard" | "documents">("dashboard");
-  const [lastUploadedAt, setLastUploadedAt] = useState<number | undefined>();
   const [intakeSynced, setIntakeSynced] = useState(false);
   const [needsIntake, setNeedsIntake] = useState(false);
   const role = session?.role;
   const sessionTokenRaw = session?.session_token;
   const snapshotCandidate = session?.candidate;
+
+  const handleCandidateUpdate = useCallback(
+    (c: CandidateDto) => {
+      const token = sessionTokenRaw;
+      if (!token) return;
+      setSession({
+        role: "candidate",
+        session_token: token,
+        candidate: c,
+      });
+    },
+    [setSession, sessionTokenRaw],
+  );
 
   const computeNeedsIntake = (c: any) => {
     const profile = c?.profile ?? null;
@@ -29,6 +41,9 @@ export function CandidateDashboard() {
     return profile?.intake_form_completed !== true || stepCompleted < 4;
   };
 
+  // Sync once per candidate session (token), not on every `candidate` object update. Including
+  // `snapshotCandidate` in deps re-ran this after intake completion, re-fetched before step 4
+  // was reliably persisted, and set `needsIntake` back to true — bouncing users to this screen.
   useEffect(() => {
     if (!role || role !== "candidate" || !sessionTokenRaw) {
       setIntakeSynced(false);
@@ -57,16 +72,13 @@ export function CandidateDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [role, sessionTokenRaw, snapshotCandidate, setSession]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see effect comment: do not re-sync on every candidate update
+  }, [role, sessionTokenRaw, setSession]);
 
   if (!session || session.role !== "candidate" || !session.candidate) return null;
 
   const candidate = session.candidate;
   const sessionToken = session.session_token ?? null;
-
-  const handleProfileUpdate = (intakeComplete: boolean) => {
-    setCurrentStage(intakeComplete ? 2 : 1);
-  };
 
   if (!intakeSynced || !sessionToken) {
     return (
@@ -95,104 +107,36 @@ export function CandidateDashboard() {
   }
 
   return (
-    <div className="dashboard-root">
-      <header className="dashboard-header">
-        <div className="dashboard-nav">
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm font-bold tracking-tight text-neutral-900">
-              GradAdvisor
-            </span>
-          </div>
-
-          <nav className="flex items-center gap-2" aria-label="Primary">
-            <button
-              type="button"
-              onClick={() => setActiveTab("dashboard")}
-              className={
-                activeTab === "dashboard"
-                  ? "rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white"
-                  : "rounded-md px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-100"
-              }
-            >
-              Dashboard
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("documents")}
-              className={
-                activeTab === "documents"
-                  ? "rounded-md bg-neutral-900 px-3 py-1.5 text-xs font-semibold text-white"
-                  : "rounded-md px-3 py-1.5 text-xs font-semibold text-neutral-600 hover:bg-neutral-100"
-              }
-            >
-              Documents
-            </button>
-          </nav>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={signOut}
-              className="btn-ghost ml-2"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-
-        <StageProgressBar currentStage={currentStage} />
-      </header>
-
-      <div className="dashboard-content">
+    <CandidateStitchShell
+      userInitials={candidateInitials(candidate.full_name ?? "")}
+      activeNav={activeTab}
+      onNavDashboard={() => setActiveTab("dashboard")}
+      onNavDocuments={() => setActiveTab("documents")}
+      activePhaseIndex={1}
+      phaseProgressCurrent={2}
+      phaseProgressTotal={6}
+      onSignOut={signOut}
+      mobileMainTab="dashboard"
+    >
+      <div className="mx-auto w-full max-w-screen-2xl px-4 py-10 sm:px-6 sm:py-12 lg:px-8">
         {activeTab === "dashboard" ? (
-          <>
-            <main className="dashboard-chat-panel">
-              <div className="flex h-full flex-col">
-                <div className="border-b border-surface-low bg-surface-low px-4 py-3">
-                  <div className="text-sm font-semibold text-neutral-900">Dashboard</div>
-                  <div className="mt-0.5 text-[11px] text-neutral-500">
-                    Chat is disabled. Upload documents and proceed through the guided steps.
-                  </div>
-                </div>
-                <div className="flex-1 bg-white p-4 text-sm text-neutral-600">
-                  Your next actions:
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                    <li>Upload supporting documents on the right.</li>
-                    <li>We’ll extract data and update your profile automatically.</li>
-                    <li>Use the Documents tab to track processing status.</li>
-                  </ul>
-                </div>
-              </div>
-            </main>
-
-            <aside className="dashboard-sidebar">
-              <SidebarDocuments
-                sessionToken={sessionToken}
-                candidateEmail={candidate.email}
-                currentStage={currentStage}
-                onFilesUploaded={() => setLastUploadedAt(Date.now())}
-              />
-            </aside>
-          </>
+          <AdmissionEvaluationPanel
+            sessionToken={sessionToken}
+            candidate={candidate}
+            onCandidateUpdate={handleCandidateUpdate}
+          />
         ) : (
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
-            <div className="border-b border-neutral-200 px-6 py-4">
-              <h2 className="text-sm font-semibold text-neutral-900">Documents</h2>
-              <p className="mt-0.5 text-xs text-neutral-500">
-                All documents for your application, grouped by the stage you uploaded them in.
-              </p>
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <SidebarDocuments
-                sessionToken={sessionToken}
-                candidateEmail={candidate.email}
-                currentStage={currentStage}
-                onFilesUploaded={() => setLastUploadedAt(Date.now())}
-              />
-            </div>
-          </main>
+          <div className="rounded-2xl border border-[#c4c6cd]/20 bg-surface-card p-8 shadow-sm">
+            <span className="mb-1 block text-[10px] font-medium uppercase tracking-widest text-on-surface-variant">
+              Documents
+            </span>
+            <h1 className="font-serif text-2xl text-brand-900">Your files</h1>
+            <p className="mt-2 text-sm text-on-surface-variant">
+              Upload flow coming soon — use Intake to add CV and life story for now.
+            </p>
+          </div>
         )}
       </div>
-    </div>
+    </CandidateStitchShell>
   );
 }

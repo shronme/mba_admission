@@ -93,17 +93,34 @@ export type AdminCandidateDetail = {
   files: AdminFileDto[];
 };
 
+/** Persisted under `profile.attributes.intake_test_scores` (JSON). */
+export type IntakeTestScoresPayload = {
+  scores_not_final_yet: boolean;
+  gmat_total: number | null;
+  gre_verbal: number | null;
+  gre_quant: number | null;
+  ea_total: number | null;
+  gre_waived: boolean;
+  toefl_total: number | null;
+  ielts_overall: number | null;
+  native_english_speaker: boolean | null;
+};
+
+export type IntakeSchoolProgramSelectionPayload = {
+  school: string;
+  school_other: string | null;
+  program_slug: string;
+  program_other: string | null;
+};
+
 export type CandidateIntakePayload = {
   full_name: string;
   country_of_residence: string;
   date_of_birth: string;
-  grad_program_focus: string;
-  /** Canonical school names from the intake list (currently US business programs). */
-  target_schools: string[];
-  /** Free text when the candidate selected the synthetic "Other" school row. */
-  target_schools_other?: string | null;
-  /** Free text when `grad_program_focus` is `other_graduate`. */
-  grad_program_focus_other?: string | null;
+  /** Up to 4 (school, program) selections for intake step 1. */
+  school_program_selections: IntakeSchoolProgramSelectionPayload[];
+  /** Optional standardized tests; stored on the profile. */
+  intake_test_scores?: IntakeTestScoresPayload | null;
 };
 
 export type ProfileGapQuestionDto = {
@@ -115,6 +132,52 @@ export type ProfileReviewResponseDto = {
   profile_complete: boolean;
   completeness_score: number;
   missing: ProfileGapQuestionDto[];
+};
+
+/** Persisted under `profile.attributes` — admission evaluation job progress. */
+export type AdmissionEvaluationJobDto = {
+  ai_run_id: string;
+  phase: string;
+  message: string;
+  updated_at: string;
+  current_school: string;
+  current_program_display_name: string;
+  current_program_slug: string;
+  program_index: number;
+  programs_total: number;
+  substep: string;
+  phase_scope: string;
+  progress_percent: number;
+  programs_completed: { school: string; program_display_name: string }[];
+};
+
+export type AdmissionEvaluationPrimaryRow = {
+  school: string;
+  program_slug: string;
+  program_display_name: string;
+  strengths?: string[];
+  weaknesses?: string[];
+  admission_chance_1_100?: number;
+  admission_band?: string;
+  narrative_strategy?: string;
+  priority_actions?: string[];
+};
+
+export type AdmissionEvaluationExtraRow = {
+  school: string;
+  program_display_name: string;
+  program_slug?: string;
+  key_match?: string;
+  action_item?: string;
+  match_strength_1_100?: number;
+  meta?: string;
+};
+
+export type AdmissionEvaluationResultDto = {
+  status: "complete" | "failed";
+  primary: AdmissionEvaluationPrimaryRow[];
+  extra: AdmissionEvaluationExtraRow[];
+  error?: string | null;
 };
 
 // Client-side request coalescing to prevent "request storms" when multiple
@@ -380,6 +443,54 @@ export async function fetchCandidateProfile(
   );
 }
 
+/** GET /candidates/me without client cache — use while polling admission evaluation. */
+export async function fetchCandidateProfileFresh(sessionToken: string): Promise<CandidateDto> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me`, {
+    method: "GET",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`GET /candidates/me: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) throw new Error(`GET /candidates/me failed: ${res.status} ${text}`);
+  return parseCandidateDto(data as Record<string, unknown>);
+}
+
+export async function startAdmissionEvaluation(sessionToken: string): Promise<{ ai_run_id: string }> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/admission-evaluation/start`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /candidates/me/admission-evaluation/start: invalid JSON (${res.status})`);
+  }
+  if (res.status === 409) {
+    throw new Error("Admission evaluation already completed.");
+  }
+  if (!res.ok) {
+    throw new Error(
+      `POST admission-evaluation/start failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
+    );
+  }
+  const o = data as { ai_run_id?: string };
+  if (!o.ai_run_id) throw new Error("missing ai_run_id");
+  return { ai_run_id: o.ai_run_id };
+}
+
 export async function patchCandidateIntake(
   sessionToken: string,
   body: CandidateIntakePayload,
@@ -397,10 +508,8 @@ export async function patchCandidateIntake(
       full_name: body.full_name.trim(),
       country_of_residence: body.country_of_residence.trim(),
       date_of_birth: body.date_of_birth,
-      grad_program_focus: body.grad_program_focus,
-      target_schools: body.target_schools,
-      target_schools_other: body.target_schools_other ?? null,
-      grad_program_focus_other: body.grad_program_focus_other ?? null,
+      school_program_selections: body.school_program_selections,
+      intake_test_scores: body.intake_test_scores ?? null,
     }),
   });
   const text = await res.text();
@@ -439,10 +548,8 @@ export async function patchCandidateIntakeDraft(
       full_name: body.full_name.trim(),
       country_of_residence: body.country_of_residence.trim(),
       date_of_birth: body.date_of_birth,
-      grad_program_focus: body.grad_program_focus,
-      target_schools: body.target_schools,
-      target_schools_other: body.target_schools_other ?? null,
-      grad_program_focus_other: body.grad_program_focus_other ?? null,
+      school_program_selections: body.school_program_selections,
+      intake_test_scores: body.intake_test_scores ?? null,
     }),
   });
   const text = await res.text();

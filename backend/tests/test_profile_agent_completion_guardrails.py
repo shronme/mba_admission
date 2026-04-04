@@ -57,3 +57,23 @@ def test_run_profile_agent_caps_score_to_structural_progress(monkeypatch) -> Non
 
     # 7 / 8 required fields populated => 88%
     assert score == 88
+
+
+def test_run_profile_agent_ignores_non_candidate_gap_keys_from_model(monkeypatch) -> None:
+    """LLM may list schema keys like target_programs; step-4 only surfaces the 8 input attrs."""
+    attrs = {**_minimal_attrs(), "motivation": "Authentic story about impact and timing."}
+
+    def _fake_run(*args, **kwargs):
+        return dspy.Prediction(
+            is_complete="false",
+            completeness_score="88",
+            gaps_json=json.dumps(["target_programs"], ensure_ascii=False),
+            synthesized_attributes_json=json.dumps({}, ensure_ascii=False),
+        )
+
+    monkeypatch.setattr("app.core.dspy_runtime.run_dspy_module", _fake_run)
+
+    is_complete, gaps, _, _ = run_profile_agent(attrs, use_openai=True, min_score=0)
+
+    assert is_complete is True
+    assert gaps == []
