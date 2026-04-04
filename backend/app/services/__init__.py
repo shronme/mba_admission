@@ -1,2 +1,5 @@
-"""Domain services (placeholder for Task 009 onward)."""
+"""Domain services that are not LLM/DSPy-specific.
+
+LLM prompts and DSPy modules live under `app.dspy` (see `app.dspy.admission_evaluation`, etc.).
+"""
 

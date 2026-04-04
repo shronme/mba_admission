@@ -1,16 +1,22 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 
 import { format } from "date-fns";
 import { DayPicker } from "react-day-picker";
 
+import { CandidateStitchShell } from "@/components/CandidateStitchShell";
 import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import type { SearchableOption } from "@/components/SearchableSelect";
 import { FinalQuestionsStep } from "@/components/FinalQuestionsStep";
-import type { CandidateDto, CandidateIntakePayload } from "@/lib/api";
+import type {
+  CandidateDto,
+  CandidateIntakePayload,
+  IntakeSchoolProgramSelectionPayload,
+  IntakeTestScoresPayload,
+} from "@/lib/api";
 import type { UploadedFileDto } from "@/lib/api";
 import {
   fetchIntakeTargetSchools,
@@ -23,6 +29,7 @@ import {
 } from "@/lib/api";
 import { COUNTRY_NAMES } from "@/data/countries";
 import { gradProgramFocusLabel } from "@/data/gradProgramFocusOptions";
+import { INTAKE_SCORE_CATEGORY_HINT, intakeScoreCategory } from "@/data/intakeTestScores";
 
 import "react-day-picker/style.css";
 
@@ -31,6 +38,7 @@ const COUNTRY_OPTIONS = COUNTRY_NAMES.map((name) => ({ value: name, label: name 
 /** Must match `INTAKE_OTHER_SCHOOL_SENTINEL` in backend `graduate_programs_catalog.py`. */
 const FALLBACK_INTAKE_OTHER_SCHOOL = "__intake_other__";
 const INTAKE_OTHER_PROGRAM_SLUG = "other_graduate";
+const MAX_SCHOOL_PROGRAM_PAIRS = 4;
 
 function buildIntakeSchoolOptions(
   primary: string[],
@@ -47,45 +55,79 @@ function buildIntakeSchoolOptions(
   return core;
 }
 
-function mergedTargetSchools(primary: string, extras: string[]): string[] {
-  const p = primary.trim();
-  const out: string[] = [];
-  const seen = new Set<string>();
-  if (p) {
-    out.push(p);
-    seen.add(p);
+type SchoolProgramPairUi = {
+  id: string;
+  school: string;
+  schoolOther: string;
+  programSlug: string;
+  programOther: string;
+};
+
+function numOrNull(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? Math.trunc(n) : null;
+}
+
+function floatOrNull(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? Math.round(n * 10) / 10 : null;
+}
+
+function packIntakeTestScoresPayload(s: {
+  scoresNotFinalYet: boolean;
+  nativeEnglishSpeaker: boolean;
+  gmatTotal: string;
+  greVerbal: string;
+  greQuant: string;
+  eaTotal: string;
+  greWaived: boolean;
+  toeflTotal: string;
+  ieltsOverall: string;
+}): IntakeTestScoresPayload {
+  const eng = s.nativeEnglishSpeaker;
+  if (s.scoresNotFinalYet) {
+    return {
+      scores_not_final_yet: true,
+      gmat_total: null,
+      gre_verbal: null,
+      gre_quant: null,
+      ea_total: null,
+      gre_waived: false,
+      toefl_total: eng ? null : numOrNull(s.toeflTotal),
+      ielts_overall: eng ? null : floatOrNull(s.ieltsOverall),
+      native_english_speaker: eng ? true : false,
+    };
   }
-  for (const x of extras) {
-    const s = x.trim();
-    if (!s || seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-  return out;
+  return {
+    scores_not_final_yet: false,
+    gmat_total: numOrNull(s.gmatTotal),
+    gre_verbal: numOrNull(s.greVerbal),
+    gre_quant: numOrNull(s.greQuant),
+    ea_total: numOrNull(s.eaTotal),
+    gre_waived: s.greWaived,
+    toefl_total: eng ? null : numOrNull(s.toeflTotal),
+    ielts_overall: eng ? null : floatOrNull(s.ieltsOverall),
+    native_english_speaker: eng ? true : false,
+  };
 }
 
 function buildIntakeStep1Payload(
   fullName: string,
   country: string,
   isoDob: string,
-  programFocus: string,
-  targetSchools: string[],
-  otherSchoolToken: string,
-  targetSchoolsOther: string,
-  gradProgramOther: string,
+  pairs: IntakeSchoolProgramSelectionPayload[],
+  intakeTestScores: IntakeTestScoresPayload,
 ): CandidateIntakePayload {
   return {
     full_name: fullName,
     country_of_residence: country,
     date_of_birth: isoDob,
-    grad_program_focus: programFocus,
-    target_schools: targetSchools,
-    target_schools_other:
-      otherSchoolToken && targetSchools.includes(otherSchoolToken)
-        ? targetSchoolsOther.trim() || null
-        : null,
-    grad_program_focus_other:
-      programFocus === INTAKE_OTHER_PROGRAM_SLUG ? gradProgramOther.trim() || null : null,
+    school_program_selections: pairs,
+    intake_test_scores: intakeTestScores,
   };
 }
 
@@ -109,40 +151,176 @@ function pickLatestByDocType(
 const INTAKE_DOC_ACCEPT =
   ".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain";
 
-const PHASES = [
-  "01. Intake",
-  "02. Profile Generation",
-  "03. Evaluation",
-  "04. Positioning",
-  "05. Application",
-  "06. Validation",
-  "07. Submission",
-] as const;
-
 const FILE_STATUS_POLL_MS = 1000;
 
-function IconBell({ className }: { className?: string }) {
+function isIntakeDocFile(file: File): boolean {
+  const n = file.name.toLowerCase();
+  if (n.endsWith(".pdf") || n.endsWith(".doc") || n.endsWith(".docx") || n.endsWith(".txt")) {
+    return true;
+  }
+  const t = file.type;
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"
-      />
-    </svg>
+    t === "application/pdf" ||
+    t === "application/msword" ||
+    t === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    t === "text/plain"
   );
 }
 
-function IconSettings({ className }: { className?: string }) {
+function IntakeFileDropZone({
+  id,
+  inputName,
+  disabled,
+  file,
+  onFileChange,
+  onInvalidFile,
+  acceptHint,
+  hideDropZone,
+}: {
+  id: string;
+  inputName: string;
+  disabled: boolean;
+  file: File | null;
+  onFileChange: (file: File | null) => void;
+  onInvalidFile: () => void;
+  acceptHint?: ReactNode;
+  /** When true, hide the dashed drag-and-drop area (e.g. after a file is chosen or while uploading). */
+  hideDropZone?: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+
+  const applyFile = (f: File | null) => {
+    if (!f) {
+      onFileChange(null);
+      return;
+    }
+    if (!isIntakeDocFile(f)) {
+      onInvalidFile();
+      if (inputRef.current) inputRef.current.value = "";
+      onFileChange(null);
+      return;
+    }
+    onFileChange(f);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.files?.[0] ?? null;
+    applyFile(next);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth.current = 0;
+    setDragging(false);
+    if (disabled) return;
+    const next = e.dataTransfer.files?.[0] ?? null;
+    applyFile(next);
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    dragDepth.current += 1;
+    if (dragDepth.current === 1) setDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragDepth.current -= 1;
+    if (dragDepth.current <= 0) {
+      dragDepth.current = 0;
+      setDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (disabled) return;
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const zoneClass = [
+    "block rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors",
+    disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+    dragging
+      ? "border-brand-900 bg-brand-900/5"
+      : "border-[#c4c6cd]/35 bg-surface-low/80 hover:border-[#c4c6cd]/55 hover:bg-surface-low",
+    "peer-focus-visible:ring-2 peer-focus-visible:ring-brand-900/25 peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-card",
+  ].join(" ");
+
+  if (hideDropZone) {
+    return (
+      <div className="mt-1">
+        <input
+          ref={inputRef}
+          id={id}
+          name={inputName}
+          type="file"
+          accept={INTAKE_DOC_ACCEPT}
+          disabled={disabled}
+          className="peer sr-only disabled:opacity-50"
+          onChange={handleInputChange}
+        />
+        {file ? (
+          <div>
+            <p className="text-xs text-on-surface-variant">
+              Selected: <span className="font-medium text-brand-900">{file.name}</span>
+            </p>
+            {acceptHint ? (
+              <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">{acceptHint}</p>
+            ) : null}
+            {!disabled ? (
+              <button
+                type="button"
+                onClick={() => inputRef.current?.click()}
+                className="mt-2 text-xs font-semibold text-brand-900 underline decoration-brand-900/40 underline-offset-2 hover:decoration-brand-900"
+              >
+                Replace file
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"
+    <div className="mt-1">
+      <input
+        ref={inputRef}
+        id={id}
+        name={inputName}
+        type="file"
+        accept={INTAKE_DOC_ACCEPT}
+        disabled={disabled}
+        className="peer sr-only disabled:opacity-50"
+        onChange={handleInputChange}
       />
-      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
+      <label
+        htmlFor={id}
+        className={zoneClass}
+        onDragEnter={handleDragEnter}
+        onDragLeave={handleDragLeave}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
+      >
+        <p className="text-sm text-on-surface">
+          <span className="font-medium text-brand-900">Drag and drop</span> a file here, or{" "}
+          <span className="font-semibold text-brand-900 underline decoration-brand-900/40 underline-offset-2">
+            choose file
+          </span>
+          .
+        </p>
+        {acceptHint ? <div className="mt-2 text-xs leading-relaxed text-on-surface-variant">{acceptHint}</div> : null}
+      </label>
+      {file ? <p className="mt-2 text-xs text-on-surface-variant">Selected: {file.name}</p> : null}
+    </div>
   );
 }
 
@@ -153,30 +331,6 @@ function IconLock({ className }: { className?: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         d="M16.5 10.5V6.75a4.5 4.5 0 00-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-      />
-    </svg>
-  );
-}
-
-function IconHelp({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z"
-      />
-    </svg>
-  );
-}
-
-function IconLogout({ className }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75"
       />
     </svg>
   );
@@ -210,11 +364,18 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const [fullName, setFullName] = useState(initialFullName);
   const [country, setCountry] = useState("");
   const [dob, setDob] = useState<Date | undefined>(undefined);
-  const [programFocus, setProgramFocus] = useState("");
-  const [gradProgramOther, setGradProgramOther] = useState("");
-  const [primarySchool, setPrimarySchool] = useState("");
-  const [additionalTargetSchools, setAdditionalTargetSchools] = useState<string[]>([]);
-  const [targetSchoolsOther, setTargetSchoolsOther] = useState("");
+  const [pairs, setPairs] = useState<SchoolProgramPairUi[]>([
+    { id: "1", school: "", schoolOther: "", programSlug: "", programOther: "" },
+  ]);
+  const [scoresNotFinalYet, setScoresNotFinalYet] = useState(false);
+  const [gmatTotal, setGmatTotal] = useState("");
+  const [greVerbal, setGreVerbal] = useState("");
+  const [greQuant, setGreQuant] = useState("");
+  const [eaTotal, setEaTotal] = useState("");
+  const [greWaived, setGreWaived] = useState(false);
+  const [toeflTotal, setToeflTotal] = useState("");
+  const [ieltsOverall, setIeltsOverall] = useState("");
+  const [nativeEnglishSpeaker, setNativeEnglishSpeaker] = useState(false);
   const [intakeOtherSchoolToken, setIntakeOtherSchoolToken] = useState(FALLBACK_INTAKE_OTHER_SCHOOL);
   const [schoolOptions, setSchoolOptions] = useState<SearchableOption[]>([]);
   const [programsBySchool, setProgramsBySchool] = useState<
@@ -243,6 +404,9 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const [error, setError] = useState<string | null>(null);
   const [dobOpen, setDobOpen] = useState(false);
   const [finalChatComplete, setFinalChatComplete] = useState(false);
+  const handleFinalChatCompleteChange = useCallback((c: boolean) => {
+    setFinalChatComplete(Boolean(c));
+  }, []);
 
   const dobWrapRef = useRef<HTMLDivElement>(null);
   const today = new Date();
@@ -253,49 +417,76 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     if (debugEnabled) console.debug("[intake]", ...args);
   };
 
-  const targetSchoolsForApi = useMemo(
-    () => mergedTargetSchools(primarySchool, additionalTargetSchools),
-    [primarySchool, additionalTargetSchools],
+  const scoreCategory = useMemo(
+    () => {
+      const first = pairs[0]?.programSlug?.trim() || "";
+      return first ? intakeScoreCategory(first) : null;
+    },
+    [pairs],
   );
 
-  const programOptions: SearchableOption[] = useMemo(() => {
-    if (!primarySchool.trim()) return [];
-    const seen = new Set<string>();
-    const collected: SearchableOption[] = [];
-    if (primarySchool === intakeOtherSchoolToken) {
+  const intakeTestScoresPayload = useMemo(
+    () =>
+      packIntakeTestScoresPayload({
+        scoresNotFinalYet,
+        nativeEnglishSpeaker,
+        gmatTotal,
+        greVerbal,
+        greQuant,
+        eaTotal,
+        greWaived,
+        toeflTotal,
+        ieltsOverall,
+      }),
+    [
+      scoresNotFinalYet,
+      nativeEnglishSpeaker,
+      gmatTotal,
+      greVerbal,
+      greQuant,
+      eaTotal,
+      greWaived,
+      toeflTotal,
+      ieltsOverall,
+    ],
+  );
+
+  const programOptionsBySchool = useMemo(() => {
+    const cache: Record<string, SearchableOption[]> = {};
+    const allProgramsUnion = () => {
+      const seen = new Set<string>();
+      const out: SearchableOption[] = [];
       for (const progs of Object.values(programsBySchool)) {
         for (const p of progs) {
           if (!p.slug || seen.has(p.slug)) continue;
           seen.add(p.slug);
-          collected.push({ value: p.slug, label: p.label || p.slug });
+          out.push({ value: p.slug, label: p.label || p.slug });
         }
       }
-    } else {
-      for (const p of programsBySchool[primarySchool] ?? []) {
+      out.sort((a, b) => a.label.localeCompare(b.label));
+      if (!seen.has(INTAKE_OTHER_PROGRAM_SLUG)) out.push({ value: INTAKE_OTHER_PROGRAM_SLUG, label: "Other — describe your program" });
+      return out;
+    };
+    const union = allProgramsUnion();
+    for (const opt of schoolOptions) {
+      const school = opt.value;
+      if (school === intakeOtherSchoolToken) {
+        cache[school] = union;
+        continue;
+      }
+      const seen = new Set<string>();
+      const rows: SearchableOption[] = [];
+      for (const p of programsBySchool[school] ?? []) {
         if (!p.slug || seen.has(p.slug)) continue;
         seen.add(p.slug);
-        collected.push({ value: p.slug, label: p.label || p.slug });
+        rows.push({ value: p.slug, label: p.label || p.slug });
       }
+      rows.sort((a, b) => a.label.localeCompare(b.label));
+      if (!seen.has(INTAKE_OTHER_PROGRAM_SLUG)) rows.push({ value: INTAKE_OTHER_PROGRAM_SLUG, label: "Other — describe your program" });
+      cache[school] = rows;
     }
-    collected.sort((a, b) => a.label.localeCompare(b.label));
-    if (!seen.has(INTAKE_OTHER_PROGRAM_SLUG)) {
-      collected.push({ value: INTAKE_OTHER_PROGRAM_SLUG, label: "Other — describe your program" });
-    }
-    return collected;
-  }, [programsBySchool, primarySchool, intakeOtherSchoolToken]);
-
-  useEffect(() => {
-    if (!primarySchool.trim() || !programFocus) return;
-    if (Object.keys(programsBySchool).length === 0) return;
-    if (programFocus === INTAKE_OTHER_PROGRAM_SLUG) return;
-    if (primarySchool === intakeOtherSchoolToken) return;
-    const ok = (programsBySchool[primarySchool] ?? []).some((p) => p.slug === programFocus);
-    if (!ok) setProgramFocus("");
-  }, [primarySchool, programFocus, programsBySchool, intakeOtherSchoolToken]);
-
-  const additionalSchoolOptions = useMemo(() => {
-    return schoolOptions.filter((o) => o.value !== primarySchool && o.value !== intakeOtherSchoolToken);
-  }, [schoolOptions, primarySchool, intakeOtherSchoolToken]);
+    return cache;
+  }, [programsBySchool, schoolOptions, intakeOtherSchoolToken]);
 
   const firstName = fullName.trim().split(/\s+/)[0] || "there";
   const initials = fullName
@@ -340,17 +531,34 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
         const p = c.profile;
         if (p?.country_of_residence) setCountry(p.country_of_residence);
         if (p?.date_of_birth) setDob(new Date(p.date_of_birth));
-        if (p?.grad_program_focus) setProgramFocus(p.grad_program_focus);
         const attrs = p?.attributes ?? null;
-        const schools = Array.isArray((attrs as any)?.target_schools) ? ((attrs as any).target_schools as string[]) : [];
-        if (schools.length) {
-          setPrimarySchool(String(schools[0] ?? ""));
-          setAdditionalTargetSchools(schools.slice(1).map(String));
+        const rawPairs = (attrs as any)?.school_program_selections;
+        if (Array.isArray(rawPairs) && rawPairs.length) {
+          const parsed: SchoolProgramPairUi[] = rawPairs
+            .filter((x) => x && typeof x === "object")
+            .slice(0, MAX_SCHOOL_PROGRAM_PAIRS)
+            .map((x, i) => ({
+              id: String(i + 1),
+              school: String((x as any).school ?? ""),
+              schoolOther: String((x as any).school_other ?? ""),
+              programSlug: String((x as any).program_slug ?? ""),
+              programOther: String((x as any).program_other ?? ""),
+            }));
+          if (parsed.length) setPairs(parsed);
         }
-        const tso = (attrs as any)?.target_schools_other;
-        if (typeof tso === "string" && tso.trim()) setTargetSchoolsOther(tso);
-        const gpo = (attrs as any)?.grad_program_focus_other;
-        if (typeof gpo === "string" && gpo.trim()) setGradProgramOther(gpo);
+        const rawScores = (attrs as Record<string, unknown> | null)?.intake_test_scores;
+        if (rawScores && typeof rawScores === "object" && !Array.isArray(rawScores)) {
+          const r = rawScores as Record<string, unknown>;
+          setScoresNotFinalYet(r.scores_not_final_yet === true);
+          setGmatTotal(typeof r.gmat_total === "number" ? String(r.gmat_total) : "");
+          setGreVerbal(typeof r.gre_verbal === "number" ? String(r.gre_verbal) : "");
+          setGreQuant(typeof r.gre_quant === "number" ? String(r.gre_quant) : "");
+          setEaTotal(typeof r.ea_total === "number" ? String(r.ea_total) : "");
+          setGreWaived(r.gre_waived === true);
+          setToeflTotal(typeof r.toefl_total === "number" ? String(r.toefl_total) : "");
+          setIeltsOverall(typeof r.ielts_overall === "number" ? String(r.ielts_overall) : "");
+          setNativeEnglishSpeaker(r.native_english_speaker === true);
+        }
         const step = Number((attrs as any)?.intake_step_completed ?? 0);
         const stepCompleted = (step === 1 || step === 2 || step === 3 || step === 4 ? step : 0) as
           | 0
@@ -360,7 +568,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
           | 4;
         debug("profile hydration", {
           intake_step_completed: stepCompleted,
-          has_target_schools: schools.length > 0,
+          has_target_schools: Array.isArray(rawPairs) ? rawPairs.length > 0 : false,
         });
         setMaxStepCompleted((prev) => (prev < stepCompleted ? stepCompleted : prev));
         if (stepCompleted >= 1) {
@@ -591,30 +799,35 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       setError("Please select your country of residence.");
       return false;
     }
-    if (!programFocus) {
-      setError("Please select a program for your target school.");
+    if (!pairs.length || !pairs[0]?.school.trim()) {
+      setError("Please select at least one school.");
       return false;
+    }
+    for (let idx = 0; idx < pairs.length; idx += 1) {
+      const p = pairs[idx]!;
+      const n = idx + 1;
+      if (!p.school.trim()) {
+        setError(`Please select a school for selection ${n}.`);
+        return false;
+      }
+      if (p.school === intakeOtherSchoolToken && !p.schoolOther.trim()) {
+        setError(`Please describe your school for selection ${n}.`);
+        return false;
+      }
+      if (!p.programSlug.trim()) {
+        setError(`Please select a program for selection ${n}.`);
+        return false;
+      }
+      if (p.programSlug === INTAKE_OTHER_PROGRAM_SLUG && !p.programOther.trim()) {
+        setError(`Please describe your program for selection ${n}.`);
+        return false;
+      }
     }
     if (!dob) {
       setError("Please select your date of birth.");
       return false;
     }
-    if (!primarySchool.trim()) {
-      setError("Please select your target school.");
-      return false;
-    }
-    if (intakeOtherSchoolToken && primarySchool === intakeOtherSchoolToken) {
-      if (!targetSchoolsOther.trim()) {
-        setError('Please describe your school when "Other" is selected.');
-        return false;
-      }
-    }
-    if (programFocus === INTAKE_OTHER_PROGRAM_SLUG) {
-      if (!gradProgramOther.trim()) {
-        setError('Please describe your program when "Other program" is selected.');
-        return false;
-      }
-    }
+    // Scores are optional.
     return true;
   };
 
@@ -656,17 +869,22 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       const isoDob = format(dob!, "yyyy-MM-dd");
       setBusy(true);
       try {
+        const selections: IntakeSchoolProgramSelectionPayload[] = pairs
+          .map((p) => ({
+            school: p.school.trim(),
+            school_other: p.school === intakeOtherSchoolToken ? p.schoolOther.trim() || null : null,
+            program_slug: p.programSlug.trim(),
+            program_other: p.programSlug === INTAKE_OTHER_PROGRAM_SLUG ? p.programOther.trim() || null : null,
+          }))
+          .filter((p) => p.school.length > 0 && p.program_slug.length > 0);
         await patchCandidateIntakeDraft(
           sessionToken,
           buildIntakeStep1Payload(
             fullName,
             country,
             isoDob,
-            programFocus,
-            targetSchoolsForApi,
-            intakeOtherSchoolToken,
-            targetSchoolsOther,
-            gradProgramOther,
+            selections,
+            intakeTestScoresPayload,
           ),
         );
         setMaxStepCompleted((prev) => (prev < 1 ? 1 : prev));
@@ -749,6 +967,14 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     const isoDob = format(dob!, "yyyy-MM-dd");
 
     try {
+      const selections: IntakeSchoolProgramSelectionPayload[] = pairs
+        .map((p) => ({
+          school: p.school.trim(),
+          school_other: p.school === intakeOtherSchoolToken ? p.schoolOther.trim() || null : null,
+          program_slug: p.programSlug.trim(),
+          program_other: p.programSlug === INTAKE_OTHER_PROGRAM_SLUG ? p.programOther.trim() || null : null,
+        }))
+        .filter((p) => p.school.length > 0 && p.program_slug.length > 0);
       if (!lifeStoryFile && lifeStoryServerStatus === "ready") {
         try {
           await patchCandidateIntakeStep(sessionToken, 3);
@@ -763,11 +989,8 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
               fullName,
               country,
               isoDob,
-              programFocus,
-              targetSchoolsForApi,
-              intakeOtherSchoolToken,
-              targetSchoolsOther,
-              gradProgramOther,
+              selections,
+              intakeTestScoresPayload,
             ),
           );
           setMaxStepCompleted(3);
@@ -829,11 +1052,8 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
             fullName,
             country,
             isoDob,
-            programFocus,
-            targetSchoolsForApi,
-            intakeOtherSchoolToken,
-            targetSchoolsOther,
-            gradProgramOther,
+            selections,
+            intakeTestScoresPayload,
           ),
         );
         setMaxStepCompleted(3);
@@ -871,124 +1091,18 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const labelClass = "block text-xs font-medium text-on-surface-variant";
 
   return (
-    <div className="min-h-screen bg-surface pb-24 text-on-surface md:pb-0">
-      {/* Top bar — Stitch Intake dashboard */}
-      <header className="fixed left-0 right-0 top-0 z-50 border-b border-[#c4c6cd]/15 bg-surface-low/80 shadow-ambient backdrop-blur-md">
-        <div className="mx-auto flex h-20 w-full max-w-screen-2xl items-center justify-between px-6 sm:px-8">
-          <div className="flex items-center gap-6 md:gap-8">
-            <span className="font-serif text-xl italic text-brand-900">GradAdvisor</span>
-            <nav className="flex items-center gap-6" aria-label="Primary">
-              <button
-                type="button"
-                onClick={() => {
-                  router.push("/");
-                }}
-                className="border-b-2 border-accent pb-1 text-sm font-semibold text-brand-900"
-              >
-                Dashboard
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  router.push("/documents");
-                }}
-                className="text-sm font-medium text-brand-500 hover:text-brand-900"
-              >
-                Documents
-              </button>
-            </nav>
-          </div>
-          <div className="flex items-center gap-4 sm:gap-6">
-            <div className="mr-2 hidden flex-col items-end sm:flex">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-                Overall Application Progress
-              </span>
-              <div className="flex items-center gap-3">
-                <div className="h-1 w-32 overflow-hidden rounded-full bg-surface-highest">
-                  <div className="h-full w-[14%] rounded-full bg-accent" />
-                </div>
-                <span className="text-xs font-semibold text-brand-900">1/7 Phases</span>
-              </div>
-            </div>
-            <div className="flex gap-3 text-brand-900">
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-container/80">
-                <IconBell className="h-5 w-5" />
-              </span>
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-full hover:bg-surface-container/80">
-                <IconSettings className="h-5 w-5" />
-              </span>
-            </div>
-            <div
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[#c4c6cd]/15 bg-surface-container font-serif text-sm font-semibold text-brand-900"
-              aria-hidden
-            >
-              {initials || "?"}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Phase sidebar */}
-      <aside className="fixed left-0 top-0 hidden h-screen w-64 flex-col border-r border-[#c4c6cd]/15 bg-surface-low py-8 pt-28 md:flex">
-        <div className="mb-10 px-6">
-          <h2 className="font-serif text-lg text-brand-900">The Curator</h2>
-          <p className="font-sans text-xs font-medium uppercase tracking-widest text-brand-500">Premium Admissions AI</p>
-        </div>
-        <div className="mb-4 px-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Application Phases</p>
-        </div>
-        <nav className="no-scrollbar flex-1 space-y-1 overflow-y-auto" aria-label="Application phases">
-          {PHASES.map((label, i) => {
-            const active = i === 0;
-            return (
-              <div
-                key={label}
-                className={
-                  active
-                    ? "ml-4 flex items-center gap-3 rounded-l-full border border-r-0 border-[#c4c6cd]/20 border-y-surface-container bg-surface-card py-2.5 pl-4 font-bold text-brand-900 shadow-sm"
-                    : "mx-4 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm text-on-surface-variant transition-colors hover:bg-surface-container"
-                }
-              >
-                <span
-                  className={
-                    active
-                      ? "h-2 w-2 shrink-0 rounded-full bg-accent"
-                      : "h-2 w-2 shrink-0 rounded-full border border-[#c4c6cd]/40"
-                  }
-                />
-                <span className="text-sm">{label}</span>
-              </div>
-            );
-          })}
-        </nav>
-        <div className="mt-auto space-y-4 px-4">
-          <button
-            type="button"
-            className="w-full rounded-xl bg-gradient-to-b from-brand-900 to-brand-800 py-3 text-sm font-semibold text-white shadow-ambient transition-opacity hover:opacity-90"
-          >
-            Upgrade to Elite
-          </button>
-          <div className="space-y-1">
-            <a className="flex items-center gap-3 px-2 py-1 text-sm text-on-surface-variant hover:text-brand-900" href="#">
-              <IconHelp className="h-4 w-4 shrink-0" />
-              Help Center
-            </a>
-            {onSignOut ? (
-              <button
-                type="button"
-                onClick={onSignOut}
-                className="flex w-full items-center gap-3 px-2 py-1 text-left text-sm text-on-surface-variant hover:text-red-700"
-              >
-                <IconLogout className="h-4 w-4 shrink-0" />
-                Log Out
-              </button>
-            ) : null}
-          </div>
-        </div>
-      </aside>
-
-      <main className="min-h-screen pt-20 md:pl-64">
-        <div className="mx-auto max-w-5xl px-6 py-10 sm:px-8 sm:py-12">
+    <CandidateStitchShell
+      userInitials={initials || "?"}
+      activeNav="dashboard"
+      onNavDashboard={() => router.push("/")}
+      onNavDocuments={() => router.push("/documents")}
+      activePhaseIndex={0}
+      phaseProgressCurrent={1}
+      phaseProgressTotal={6}
+      onSignOut={onSignOut}
+      mobileMainTab="intake"
+    >
+      <div className="mx-auto max-w-5xl px-6 py-10 sm:px-8 sm:py-12">
           <header className="mb-10 sm:mb-12">
             <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
               <span className="rounded bg-surface-container px-2 py-0.5 font-bold tracking-wide text-on-surface-variant">
@@ -1124,45 +1238,144 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                             ) : null}
                           </div>
 
-                          <div className="mt-5">
-                            <SearchableSelect
-                              id="intake-primary-school"
-                              label="Target school"
-                              options={schoolOptions}
-                              value={primarySchool}
-                              onChange={(v) => {
-                                setPrimarySchool(v);
-                                setProgramFocus("");
-                                setGradProgramOther("");
-                                if (v !== intakeOtherSchoolToken) setTargetSchoolsOther("");
-                                setAdditionalTargetSchools((prev) => prev.filter((x) => x !== v));
-                                setError((prev) => (prev === "Please select your target school." ? null : prev));
-                              }}
-                              disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
-                              placeholder={schoolsLoading ? "Loading schools…" : "Search schools…"}
-                              emptyMessage="No school matches"
-                              maxVisible={200}
-                            />
-                            {intakeOtherSchoolToken && primarySchool === intakeOtherSchoolToken ? (
-                              <div className="mt-3">
-                                <label htmlFor="intake-school-other" className={labelClass}>
-                                  School name(s) not in the list
-                                </label>
-                                <textarea
-                                  id="intake-school-other"
-                                  value={targetSchoolsOther}
-                                  onChange={(e) => {
-                                    setTargetSchoolsOther(e.target.value);
-                                    setError((prev) =>
-                                      prev === 'Please describe your school when "Other" is selected.' ? null : prev,
-                                    );
-                                  }}
-                                  disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
-                                  rows={3}
-                                  placeholder="e.g. London Business School"
-                                  className={`${fieldShell} min-h-[5rem] resize-y`}
-                                />
-                              </div>
+                          <div className="mt-5 space-y-5">
+                            {pairs.map((pair, idx) => {
+                              const n = idx + 1;
+                              const progOptions = pair.school ? programOptionsBySchool[pair.school] ?? [] : [];
+                              return (
+                                <div key={pair.id} className="rounded-xl border border-white/10 bg-white/5 p-4">
+                                  <div className="flex items-center justify-between gap-3">
+                                    <p className="text-xs font-bold uppercase tracking-[0.2em] text-on-surface-variant">
+                                      School {n}
+                                    </p>
+                                    {pairs.length > 1 ? (
+                                      <button
+                                        type="button"
+                                        disabled={busy}
+                                        onClick={() => {
+                                          setPairs((prev) => prev.filter((p) => p.id !== pair.id));
+                                        }}
+                                        className="rounded-lg border border-[#c4c6cd]/30 bg-surface-highest px-3 py-1.5 text-xs font-semibold text-on-surface hover:bg-surface-high disabled:opacity-50"
+                                      >
+                                        Remove
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-3">
+                                    <SearchableSelect
+                                      id={`intake-school-${pair.id}`}
+                                      label="School"
+                                      options={schoolOptions}
+                                      value={pair.school}
+                                      onChange={(v) => {
+                                        setPairs((prev) =>
+                                          prev.map((p) =>
+                                            p.id === pair.id
+                                              ? { ...p, school: v, schoolOther: "", programSlug: "", programOther: "" }
+                                              : p,
+                                          ),
+                                        );
+                                      }}
+                                      disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                                      placeholder={schoolsLoading ? "Loading schools…" : "Search schools…"}
+                                      emptyMessage="No school matches"
+                                      maxVisible={200}
+                                    />
+                                    {pair.school === intakeOtherSchoolToken ? (
+                                      <div className="mt-3">
+                                        <label htmlFor={`intake-school-other-${pair.id}`} className={labelClass}>
+                                          School name not in the list
+                                        </label>
+                                        <textarea
+                                          id={`intake-school-other-${pair.id}`}
+                                          value={pair.schoolOther}
+                                          onChange={(e) =>
+                                            setPairs((prev) =>
+                                              prev.map((p) => (p.id === pair.id ? { ...p, schoolOther: e.target.value } : p)),
+                                            )
+                                          }
+                                          disabled={busy}
+                                          rows={2}
+                                          placeholder="e.g. London Business School"
+                                          className={`${fieldShell} min-h-[4rem] resize-y`}
+                                        />
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  {pair.school.trim() ? (
+                                    <div className="mt-4">
+                                      <SearchableSelect
+                                        id={`intake-program-${pair.id}`}
+                                        label="Program"
+                                        options={progOptions}
+                                        value={pair.programSlug}
+                                        onChange={(v) => {
+                                          setPairs((prev) =>
+                                            prev.map((p) =>
+                                              p.id === pair.id
+                                                ? { ...p, programSlug: v, programOther: v === INTAKE_OTHER_PROGRAM_SLUG ? p.programOther : "" }
+                                                : p,
+                                            ),
+                                          );
+                                        }}
+                                        disabled={busy || schoolsLoading || Boolean(schoolsLoadError) || progOptions.length === 0}
+                                        placeholder="Search programs…"
+                                        emptyMessage="No program matches"
+                                        maxVisible={200}
+                                      />
+                                      {pair.programSlug === INTAKE_OTHER_PROGRAM_SLUG ? (
+                                        <div className="mt-3">
+                                          <label htmlFor={`intake-program-other-${pair.id}`} className={labelClass}>
+                                            Describe your program
+                                          </label>
+                                          <textarea
+                                            id={`intake-program-other-${pair.id}`}
+                                            value={pair.programOther}
+                                            onChange={(e) =>
+                                              setPairs((prev) =>
+                                                prev.map((p) =>
+                                                  p.id === pair.id ? { ...p, programOther: e.target.value } : p,
+                                                ),
+                                              )
+                                            }
+                                            disabled={busy}
+                                            rows={2}
+                                            placeholder="e.g. MSc in Human–Computer Interaction"
+                                            className={`${fieldShell} min-h-[4rem] resize-y`}
+                                          />
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+
+                            {pairs.length < MAX_SCHOOL_PROGRAM_PAIRS ? (
+                              <button
+                                type="button"
+                                disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
+                                aria-label="Add another target school and program"
+                                onClick={() => {
+                                  setPairs((prev) => [
+                                    ...prev,
+                                    {
+                                      id: String(Date.now()),
+                                      school: "",
+                                      schoolOther: "",
+                                      programSlug: "",
+                                      programOther: "",
+                                    },
+                                  ]);
+                                }}
+                                className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-accent/50 bg-accent/5 px-4 py-3 text-sm font-semibold text-brand-900 shadow-sm hover:bg-accent/10 disabled:opacity-50"
+                              >
+                                <span className="text-xl font-bold leading-none text-accent" aria-hidden>
+                                  +
+                                </span>
+                                Add another school (up to {MAX_SCHOOL_PROGRAM_PAIRS})
+                              </button>
                             ) : null}
                           </div>
 
@@ -1172,69 +1385,250 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                             </p>
                           ) : null}
 
-                          {primarySchool.trim() ? (
-                            <div className="mt-5">
-                              <SearchableSelect
-                                id="intake-program"
-                                label="Program at this school"
-                                options={programOptions}
-                                value={programFocus}
-                                onChange={(v) => {
-                                  setProgramFocus(v);
-                                  if (v !== INTAKE_OTHER_PROGRAM_SLUG) setGradProgramOther("");
-                                  setError((prev) =>
-                                    prev === "Please select a program for your target school." ? null : prev,
-                                  );
-                                }}
-                                disabled={
-                                  busy || schoolsLoading || Boolean(schoolsLoadError) || programOptions.length === 0
-                                }
-                                placeholder="Search programs for this school…"
-                                emptyMessage="No program matches"
-                                maxVisible={200}
-                              />
-                              {programFocus === INTAKE_OTHER_PROGRAM_SLUG ? (
-                                <div className="mt-3">
-                                  <label htmlFor="intake-program-other" className={labelClass}>
-                                    Describe your program
-                                  </label>
-                                  <textarea
-                                    id="intake-program-other"
-                                    value={gradProgramOther}
-                                    onChange={(e) => {
-                                      setGradProgramOther(e.target.value);
-                                      setError((prev) =>
-                                        prev === 'Please describe your program when "Other program" is selected.'
-                                          ? null
-                                          : prev,
-                                      );
-                                    }}
-                                    disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
-                                    rows={3}
-                                    placeholder="e.g. MSc in Human–Computer Interaction"
-                                    className={`${fieldShell} min-h-[5rem] resize-y`}
-                                  />
+                          {pairs[0]?.programSlug?.trim() ? (
+                            <div className="mt-8 border-t border-white/10 pt-6">
+                              <h3 className="font-serif text-lg text-brand-900">Standardized tests (optional)</h3>
+                              {scoreCategory ? (
+                                <p className="mt-1 text-sm text-on-surface-variant">
+                                  {INTAKE_SCORE_CATEGORY_HINT[scoreCategory]}
+                                </p>
+                              ) : null}
+                              <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm text-on-surface">
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#c4c6cd]/40"
+                                  checked={scoresNotFinalYet}
+                                  onChange={(e) => setScoresNotFinalYet(e.target.checked)}
+                                  disabled={busy}
+                                />
+                                <span>I don&apos;t have the final score yet (GMAT, GRE, EA, etc.)</span>
+                              </label>
+
+                              {!scoresNotFinalYet && scoreCategory === "mba" ? (
+                                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                  <div>
+                                    <label htmlFor="intake-gmat" className={labelClass}>
+                                      GMAT (total)
+                                    </label>
+                                    <input
+                                      id="intake-gmat"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={gmatTotal}
+                                      onChange={(e) => setGmatTotal(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="e.g. 685"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label htmlFor="intake-gre-v-mba" className={labelClass}>
+                                      GRE Verbal
+                                    </label>
+                                    <input
+                                      id="intake-gre-v-mba"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={greVerbal}
+                                      onChange={(e) => setGreVerbal(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="130–170"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label htmlFor="intake-gre-q-mba" className={labelClass}>
+                                      GRE Quantitative
+                                    </label>
+                                    <input
+                                      id="intake-gre-q-mba"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={greQuant}
+                                      onChange={(e) => setGreQuant(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="130–170"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label htmlFor="intake-ea" className={labelClass}>
+                                      Executive Assessment (EA)
+                                    </label>
+                                    <input
+                                      id="intake-ea"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={eaTotal}
+                                      onChange={(e) => setEaTotal(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="100–200"
+                                    />
+                                  </div>
                                 </div>
                               ) : null}
-                            </div>
-                          ) : null}
 
-                          {primarySchool.trim() && maxSchoolSelections > 1 ? (
-                            <div className="mt-5">
-                              <SearchableMultiSelect
-                                id="intake-additional-schools"
-                                label="Additional schools (optional)"
-                                options={additionalSchoolOptions}
-                                values={additionalTargetSchools}
-                                onChange={(v) =>
-                                  setAdditionalTargetSchools(v.filter((x) => x !== primarySchool))
-                                }
-                                disabled={busy || schoolsLoading || Boolean(schoolsLoadError)}
-                                placeholder="Add more schools…"
-                                emptyMessage="No school matches"
-                                maxVisible={200}
-                                maxSelections={Math.max(0, maxSchoolSelections - 1)}
-                              />
+                              {!scoresNotFinalYet &&
+                              (scoreCategory === "masters" || scoreCategory === "other") ? (
+                                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                  <div>
+                                    <label htmlFor="intake-gre-v-ms" className={labelClass}>
+                                      GRE Verbal
+                                    </label>
+                                    <input
+                                      id="intake-gre-v-ms"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={greVerbal}
+                                      onChange={(e) => setGreVerbal(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="130–170"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label htmlFor="intake-gre-q-ms" className={labelClass}>
+                                      GRE Quantitative
+                                    </label>
+                                    <input
+                                      id="intake-gre-q-ms"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={greQuant}
+                                      onChange={(e) => setGreQuant(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="130–170"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-2">
+                                    <label htmlFor="intake-gmat-ms" className={labelClass}>
+                                      GMAT (optional)
+                                    </label>
+                                    <input
+                                      id="intake-gmat-ms"
+                                      type="text"
+                                      inputMode="numeric"
+                                      value={gmatTotal}
+                                      onChange={(e) => setGmatTotal(e.target.value)}
+                                      disabled={busy}
+                                      className={fieldShell}
+                                      placeholder="Some programs accept GMAT"
+                                    />
+                                  </div>
+                                </div>
+                              ) : null}
+
+                              {!scoresNotFinalYet && scoreCategory === "phd" ? (
+                                <div className="mt-4 space-y-4">
+                                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                    <div>
+                                      <label htmlFor="intake-gre-v-phd" className={labelClass}>
+                                        GRE Verbal
+                                      </label>
+                                      <input
+                                        id="intake-gre-v-phd"
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={greVerbal}
+                                        onChange={(e) => setGreVerbal(e.target.value)}
+                                        disabled={busy || greWaived}
+                                        className={fieldShell}
+                                        placeholder="130–170"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label htmlFor="intake-gre-q-phd" className={labelClass}>
+                                        GRE Quantitative
+                                      </label>
+                                      <input
+                                        id="intake-gre-q-phd"
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={greQuant}
+                                        onChange={(e) => setGreQuant(e.target.value)}
+                                        disabled={busy || greWaived}
+                                        className={fieldShell}
+                                        placeholder="130–170"
+                                      />
+                                    </div>
+                                  </div>
+                                  <label className="flex cursor-pointer items-start gap-3 text-sm text-on-surface">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#c4c6cd]/40"
+                                      checked={greWaived}
+                                      onChange={(e) => {
+                                        setGreWaived(e.target.checked);
+                                        if (e.target.checked) {
+                                          setGreVerbal("");
+                                          setGreQuant("");
+                                        }
+                                      }}
+                                      disabled={busy}
+                                    />
+                                    <span>GRE waived or not required for my program</span>
+                                  </label>
+                                </div>
+                              ) : null}
+
+                              <div className="mt-6 border-t border-white/10 pt-4">
+                                <p className="text-sm font-medium text-brand-900">English proficiency</p>
+                                <p className="mt-1 text-xs text-on-surface-variant">
+                                  TOEFL or IELTS if English is not your first language.
+                                </p>
+                                <label className="mt-3 flex cursor-pointer items-start gap-3 text-sm text-on-surface">
+                                  <input
+                                    type="checkbox"
+                                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-[#c4c6cd]/40"
+                                    checked={nativeEnglishSpeaker}
+                                    onChange={(e) => {
+                                      setNativeEnglishSpeaker(e.target.checked);
+                                      if (e.target.checked) {
+                                        setToeflTotal("");
+                                        setIeltsOverall("");
+                                      }
+                                    }}
+                                    disabled={busy}
+                                  />
+                                  <span>I am a native English speaker</span>
+                                </label>
+                                {!nativeEnglishSpeaker ? (
+                                  <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                    <div>
+                                      <label htmlFor="intake-toefl" className={labelClass}>
+                                        TOEFL iBT (total)
+                                      </label>
+                                      <input
+                                        id="intake-toefl"
+                                        type="text"
+                                        inputMode="numeric"
+                                        value={toeflTotal}
+                                        onChange={(e) => setToeflTotal(e.target.value)}
+                                        disabled={busy}
+                                        className={fieldShell}
+                                        placeholder="0–120"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label htmlFor="intake-ielts" className={labelClass}>
+                                        IELTS (overall band)
+                                      </label>
+                                      <input
+                                        id="intake-ielts"
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={ieltsOverall}
+                                        onChange={(e) => setIeltsOverall(e.target.value)}
+                                        disabled={busy}
+                                        className={fieldShell}
+                                        placeholder="e.g. 7.5"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                           ) : null}
                         </div>
@@ -1252,8 +1646,9 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                               schoolsLoading ||
                               Boolean(schoolsLoadError) ||
                               schoolOptions.length === 0 ||
-                              !primarySchool.trim() ||
-                              programOptions.length === 0
+                              pairs.length === 0 ||
+                              !pairs[0]?.school.trim() ||
+                              !pairs[0]?.programSlug.trim()
                             }
                             className="group/btn flex w-full items-center justify-center gap-3 rounded-lg bg-accent px-8 py-4 text-sm font-bold text-brand-900 shadow-xl shadow-accent/20 transition-transform hover:scale-[1.02] disabled:opacity-50 sm:w-auto"
                           >
@@ -1266,16 +1661,11 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-5 py-4">
                         <p className="text-sm text-brand-200/90">
                           Completed: {country || "—"},{" "}
-                          {programFocus === INTAKE_OTHER_PROGRAM_SLUG
-                            ? gradProgramOther.trim() || "Other program"
-                            : gradProgramFocusLabel(programFocus) || programFocus || "—"}
-                          , {targetSchoolsForApi.length} school
-                          {targetSchoolsForApi.length === 1 ? "" : "s"}
-                          {intakeOtherSchoolToken && targetSchoolsForApi.includes(intakeOtherSchoolToken)
-                            ? targetSchoolsOther.trim()
-                              ? ` (incl. other: ${targetSchoolsOther.trim()})`
-                              : " (incl. other)"
-                            : ""}
+                          {pairs[0]?.programSlug === INTAKE_OTHER_PROGRAM_SLUG
+                            ? pairs[0]?.programOther.trim() || "Other program"
+                            : gradProgramFocusLabel(pairs[0]?.programSlug) || pairs[0]?.programSlug || "—"}
+                          , {pairs.length} school
+                          {pairs.length === 1 ? "" : "s"}
                         </p>
                           {canEditStep(1) ? (
                           <button
@@ -1345,18 +1735,20 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                         <label htmlFor="intake-cv" className={labelClass}>
                           CV or résumé
                         </label>
-                        <input
+                        <IntakeFileDropZone
                           id="intake-cv"
-                          name="cv"
-                          type="file"
-                          accept={INTAKE_DOC_ACCEPT}
+                          inputName="cv"
                           disabled={uiLocked || !canAccessStep(2)}
-                          className="mt-1 block w-full text-sm text-on-surface file:mr-3 file:rounded-md file:border-0 file:bg-brand-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-brand-800 disabled:opacity-50"
-                          onChange={(e) => setCvFile(e.target.files?.[0] ?? null)}
+                          file={cvFile}
+                          hideDropZone={Boolean(cvFile) || cvProcessing}
+                          onFileChange={(f) => {
+                            setError(null);
+                            setCvFile(f);
+                          }}
+                          onInvalidFile={() =>
+                            setError("Please upload a PDF, Word, or plain text file.")
+                          }
                         />
-                        {cvFile ? (
-                          <p className="mt-2 text-xs text-on-surface-variant">Selected: {cvFile.name}</p>
-                        ) : null}
                       </div>
                       {error ? (
                         <p className="mt-4 text-sm text-red-600" role="alert">
@@ -1453,21 +1845,21 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                         <label htmlFor="intake-life" className={labelClass}>
                           Life story
                         </label>
-                        <p className="mt-0.5 text-xs leading-relaxed text-on-surface-variant">
-                          PDF, Word, or plain text is fine.
-                        </p>
-                        <input
+                        <IntakeFileDropZone
                           id="intake-life"
-                          name="life_story"
-                          type="file"
-                          accept={INTAKE_DOC_ACCEPT}
+                          inputName="life_story"
                           disabled={uiLocked || !canAccessStep(3)}
-                          className="mt-2 block w-full text-sm text-on-surface file:mr-3 file:rounded-md file:border-0 file:bg-brand-900 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-brand-800 disabled:opacity-50"
-                          onChange={(e) => setLifeStoryFile(e.target.files?.[0] ?? null)}
+                          file={lifeStoryFile}
+                          acceptHint="PDF, Word, or plain text is fine."
+                          hideDropZone={Boolean(lifeStoryFile) || lifeStoryProcessing}
+                          onFileChange={(f) => {
+                            setError(null);
+                            setLifeStoryFile(f);
+                          }}
+                          onInvalidFile={() =>
+                            setError("Please upload a PDF, Word, or plain text file.")
+                          }
                         />
-                        {lifeStoryFile ? (
-                          <p className="mt-2 text-xs text-on-surface-variant">Selected: {lifeStoryFile.name}</p>
-                        ) : null}
                       </div>
                       {error ? (
                         <p className="mt-4 text-sm text-red-600" role="alert">
@@ -1542,7 +1934,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                       <div className="mt-5 overflow-hidden rounded-xl border border-[#c4c6cd]/20">
                         <FinalQuestionsStep
                           sessionToken={sessionToken}
-                          onCompleteChange={(c) => setFinalChatComplete(Boolean(c))}
+                          onCompleteChange={handleFinalChatCompleteChange}
                         />
                       </div>
 
@@ -1555,12 +1947,10 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                               setError(null);
                               setBusy(true);
                               try {
-                                try {
-                                  await patchCandidateIntakeStep(sessionToken, 4);
-                                } catch {
-                                  // Non-blocking: allow continue if step-save fails transiently.
-                                }
-                                const updated = await fetchCandidateProfile(sessionToken);
+                                // Persist step 4 before leaving intake. The dashboard re-fetches profile on
+                                // session updates; swallowing this error left the server on step < 4 and
+                                // forced the user back into intake after a brief flash of evaluation.
+                                const updated = await patchCandidateIntakeStep(sessionToken, 4);
                                 setMaxStepCompleted(4);
                                 onComplete(updated);
                               } catch (err) {
@@ -1572,7 +1962,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                           }}
                           className="group/btn flex w-full items-center justify-center gap-3 rounded-lg bg-accent px-8 py-4 text-sm font-bold text-brand-900 shadow-xl shadow-accent/20 transition-transform hover:scale-[1.02] disabled:opacity-50 sm:w-auto"
                         >
-                          Continue to Phase 02
+                          Continue to evaluation
                           <IconArrowForward className="h-5 w-5 transition-transform group-hover/btn:translate-x-1" />
                         </button>
                         <p className="text-xs text-on-surface-variant">
@@ -1629,47 +2019,6 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
             </div>
           </footer>
         </div>
-      </main>
-
-      {/* Mobile tab bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-[#c4c6cd]/20 bg-surface-low/90 px-4 py-3 backdrop-blur-md md:hidden">
-        <span className="flex flex-col items-center gap-1 text-brand-900">
-          <svg className="h-6 w-6" fill="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z" />
-          </svg>
-          <span className="text-[10px] font-medium uppercase tracking-wider">Intake</span>
-        </span>
-        <span className="flex flex-col items-center gap-1 text-on-surface-variant">
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z"
-            />
-          </svg>
-          <span className="text-[10px] font-medium uppercase tracking-wider">Docs</span>
-        </span>
-        <span className="flex flex-col items-center gap-1 text-on-surface-variant">
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z"
-            />
-          </svg>
-          <span className="text-[10px] font-medium uppercase tracking-wider">AI</span>
-        </span>
-        <span className="flex flex-col items-center gap-1 text-on-surface-variant">
-          <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
-            />
-          </svg>
-          <span className="text-[10px] font-medium uppercase tracking-wider">Profile</span>
-        </span>
-      </div>
-    </div>
+    </CandidateStitchShell>
   );
 }

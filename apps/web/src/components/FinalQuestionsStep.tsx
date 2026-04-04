@@ -119,8 +119,18 @@ export function FinalQuestionsStep({ sessionToken, onCompleteChange }: Props) {
             </div>
           </div>
         ) : (
-          <div className="text-sm text-neutral-600">
-            No remaining questions found. Click “Re-check” to refresh.
+          <div className="space-y-3">
+            <div className="text-sm text-neutral-600">
+              No remaining questions found. If this looks wrong, refresh the profile check below.
+            </div>
+            <button
+              type="button"
+              onClick={() => void refresh()}
+              disabled={busy}
+              className="rounded-md border border-neutral-200 bg-white px-4 py-2 text-sm font-semibold text-neutral-800 hover:bg-neutral-50 disabled:opacity-50"
+            >
+              Re-check
+            </button>
           </div>
         )}
 

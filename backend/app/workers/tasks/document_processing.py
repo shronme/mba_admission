@@ -65,6 +65,19 @@ _EXTRACT_PROMPT = (
 )
 
 
+def _pdf_plain_text(*, data: bytes, filename: str) -> str | None:
+    """Extract text from PDF bytes (no LLM). Used for PDFs and as fallback."""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(io.BytesIO(data))
+        text = "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
+        return text or None
+    except Exception:
+        logger.exception("doc_processing pdf_plain_extract_failed filename=%s", filename)
+        return None
+
+
 def _image_mime(filename: str, content_type: str | None) -> str:
     fn_l = filename.lower()
     if fn_l.endswith(".png"):
@@ -83,9 +96,9 @@ def _llm_extract(*, data: bytes, filename: str, content_type: str | None) -> str
     """
     LLM-based extraction via OpenAI.
 
-    GPT-4o accepts images and PDFs directly as base64 — no preprocessing needed.
-    The only case that requires prior unpacking is DOCX, because it is a binary
-    ZIP format that no LLM API accepts as a media type.
+    Vision: images as base64 in image_url. PDFs are not accepted there (image-only
+    MIME types); we extract text with pypdf first, then run the same text prompt
+    as for plain-text uploads. DOCX is unpacked to XML before prompting.
     """
     from openai import OpenAI
 
@@ -93,12 +106,24 @@ def _llm_extract(*, data: bytes, filename: str, content_type: str | None) -> str
     fn_l = filename.lower()
     ct_l = (content_type or "").lower()
 
-    # ── Images + PDFs → send the raw bytes directly to GPT-4o ─────────────────
     is_image = any(fn_l.endswith(e) for e in _IMAGE_EXTS) or ct_l in _IMAGE_MIMES
     is_pdf = ct_l == "application/pdf" or fn_l.endswith(".pdf")
 
-    if is_image or is_pdf:
-        mime = _image_mime(filename, content_type) if is_image else "application/pdf"
+    # ── PDFs → pypdf then text model (chat image_url rejects application/pdf) ─
+    if is_pdf:
+        raw = _pdf_plain_text(data=data, filename=filename)
+        if not raw or not raw.strip():
+            return None
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": _EXTRACT_PROMPT + "\n\n" + raw[:30_000]}],
+            max_tokens=4096,
+        )
+        return resp.choices[0].message.content
+
+    # ── Images → vision ───────────────────────────────────────────────────────
+    if is_image:
+        mime = _image_mime(filename, content_type)
         b64 = base64.b64encode(data).decode()
         resp = client.chat.completions.create(
             model="gpt-4o",
@@ -170,15 +195,7 @@ def _code_extract(*, data: bytes, filename: str, content_type: str | None) -> st
         return data.decode("utf-8", errors="ignore").strip() or None
 
     if ct_l == "application/pdf" or fn_l.endswith(".pdf"):
-        try:
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(data))
-            text = "\n\n".join(page.extract_text() or "" for page in reader.pages).strip()
-            return text or None
-        except Exception:
-            logger.exception("doc_processing code_extract pdf_failed filename=%s", filename)
-            return None
+        return _pdf_plain_text(data=data, filename=filename)
 
     if fn_l.endswith(".docx") or ct_l in _DOCX_MIMES:
         try:

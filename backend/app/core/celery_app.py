@@ -40,5 +40,6 @@ import app.workers.tasks.ping_redis  # noqa: E402, F401
 import app.workers.tasks.profile_update  # noqa: E402, F401
 import app.workers.tasks.sample_ai_job_task  # noqa: E402, F401
 import app.workers.tasks.wiring_smoke_task  # noqa: E402, F401
+import app.workers.tasks.admission_evaluation_task  # noqa: E402, F401
 
 logger.info("Celery app configured with Redis broker/result")

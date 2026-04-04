@@ -68,6 +68,9 @@ def _intake_programs_by_school_payload() -> dict[str, list[dict[str, str]]]:
 
 def _merge_intake_profile_attributes(attrs: dict[str, Any], body: CandidateIntakeUpdate) -> None:
     attrs["target_schools"] = body.target_schools
+    attrs["school_program_selections"] = [
+        s.model_dump(mode="json") for s in body.school_program_selections
+    ]
     if INTAKE_OTHER_SCHOOL_SENTINEL in body.target_schools:
         tso = (body.target_schools_other or "").strip()
         attrs["target_schools_other"] = tso if tso else None
@@ -79,6 +82,9 @@ def _merge_intake_profile_attributes(attrs: dict[str, Any], body: CandidateIntak
         attrs["grad_program_focus_other"] = gpo if gpo else None
     else:
         attrs.pop("grad_program_focus_other", None)
+
+    if body.intake_test_scores is not None:
+        attrs["intake_test_scores"] = body.intake_test_scores.model_dump(mode="json")
 
 
 def _candidate_to_out(c: Candidate) -> CandidateOut:

@@ -24,6 +24,13 @@ class BaseJobPayload(BaseModel):
     )
 
 
+class AdmissionEvaluationJobPayload(BaseJobPayload):
+    """Enqueue full admission evaluation (per-program research + evaluation)."""
+
+    ai_run_id: uuid.UUID
+    candidate_id: uuid.UUID
+
+
 class SampleSleepJobPayload(BaseJobPayload):
     """
     Demo payload for Task 003 — simulates a short AI-style job with DB status updates.
