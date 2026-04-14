@@ -10,12 +10,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
 import re
 from typing import Any
 
 import dspy
 
-from app.constants.graduate_programs_catalog import ORDERED_SCHOOL_NAMES, PROGRAMS_BY_SCHOOL
+from app.constants.graduate_programs_catalog import (
+    ORDERED_SCHOOL_NAMES,
+    PROGRAMS_BY_SCHOOL,
+    ranked_schools_offering_program,
+)
 from app.core.dspy_runtime import configure_dspy_from_env, run_dspy_module
 from app.dspy.program_dossier_researcher import run_program_dossier_researcher
 
@@ -41,14 +46,10 @@ def _configure_perplexity_lm() -> bool:
     )
     if not str(model).startswith("perplexity/"):
         model = "perplexity/sonar-pro"
-    base = (os.getenv("PERPLEXITY_BASE_URL") or os.getenv("PERPLEXITY_API_BASE") or "https://api.perplexity.ai").strip()
+    # Centralize LM configuration inside `app.core.dspy_runtime.configure_dspy_from_env()`.
+    # Here we only ensure env vars are consistent for this run.
     os.environ["DSPY_MODE"] = "perplexity"
     os.environ["DSPY_MODEL"] = model
-    try:
-        lm = dspy.LM(model, api_key=api_key, api_base=base)
-    except TypeError:
-        lm = dspy.LM(model, api_key=api_key, base_url=base)
-    dspy.configure(lm=lm)
     return True
 
 
@@ -59,11 +60,9 @@ def _configure_openai_lm() -> bool:
     model = os.getenv("OPENAI_EVAL_MODEL") or os.getenv("DSPY_MODEL") or "openai/gpt-4o-mini"
     if not str(model).startswith("openai/"):
         model = "openai/gpt-4o-mini"
-    try:
-        lm = dspy.LM(model, api_key=key)
-    except Exception:  # noqa: BLE001
-        return False
-    dspy.configure(lm=lm)
+    # Centralize LM configuration inside `app.core.dspy_runtime.configure_dspy_from_env()`.
+    os.environ["DSPY_MODE"] = (os.getenv("DSPY_MODE") or "openai").strip() or "openai"
+    os.environ["DSPY_MODEL"] = model
     return True
 
 
@@ -241,6 +240,7 @@ def evaluate_extra_program_json(
             "key_match": "Mock alignment with your background.",
             "action_item": "Reach out to a student club in this area (mock).",
             "match_strength_1_100": 75,
+            "admission_chance_1_100": 78,
             "meta": "Mock meta",
         }
 
@@ -250,7 +250,12 @@ def evaluate_extra_program_json(
     class ExtraSig(dspy.Signature):
         """Alternative program suggestion evaluation. JSON only, no markdown.
 
-        Keys: key_match (string), action_item (string), match_strength_1_100 (int), meta (short location/format string)
+        Keys:
+        - key_match: string
+        - action_item: string
+        - match_strength_1_100: int (1-100)
+        - admission_chance_1_100: int (1-100)
+        - meta: short location/format string
         """
 
         school: str = dspy.InputField()
@@ -280,6 +285,7 @@ def evaluate_extra_program_json(
             "key_match": "Could not parse model output (mock).",
             "action_item": "Review official program page (mock).",
             "match_strength_1_100": 70,
+            "admission_chance_1_100": 70,
             "meta": "",
         }
     parsed.setdefault("school", school)
@@ -325,6 +331,41 @@ def pick_similar_programs(
             if len(out) >= max_programs:
                 return out
     return out
+
+
+def ranked_random_program_candidates(
+    *,
+    program_slug: str,
+    selected_keys: set[tuple[str, str]],
+    rng: random.Random | None = None,
+    max_programs: int | None = None,
+) -> list[dict[str, str]]:
+    """
+    Build a randomized list of candidate (school, program_slug) from ranked schools that
+    offer the given program, excluding any already-selected (school, slug) pairs.
+    """
+    slug = (program_slug or "").strip()
+    if not slug:
+        return []
+
+    schools = list(ranked_schools_offering_program(slug))
+    schools = [s for s in schools if (s, slug) not in selected_keys]
+    if not schools:
+        return []
+
+    (rng or random).shuffle(schools)
+
+    if isinstance(max_programs, int) and max_programs > 0:
+        schools = schools[:max_programs]
+
+    return [
+        {
+            "school": school,
+            "program_slug": slug,
+            "program_display_name": program_display_label(school, slug),
+        }
+        for school in schools
+    ]
 
 
 def format_profile_snapshot(attributes: dict[str, Any] | None) -> str:

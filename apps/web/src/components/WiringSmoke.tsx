@@ -1,17 +1,9 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import {
-  enqueueWiringSmoke,
-  fetchWiringSmokeStatus,
-  getApiBaseUrl,
-} from "@/lib/api";
+import { enqueueWiringSmoke, getApiBaseUrl } from "@/lib/api";
 
 type Phase = "idle" | "running" | "done" | "error";
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 export function WiringSmoke() {
   const base = getApiBaseUrl();
@@ -22,33 +14,15 @@ export function WiringSmoke() {
   const run = useCallback(async () => {
     if (!base) return;
     setPhase("running");
-    setLog("Enqueueing…");
+    setLog("Running…");
     setLastPayload(null);
     try {
-      const { job_id: jobId } = await enqueueWiringSmoke();
-      setLog(`Enqueued job_id=${jobId}\nPolling…`);
-
-      const deadline = Date.now() + 60_000;
-      let lastState = "";
-      while (Date.now() < deadline) {
-        const payload = await fetchWiringSmokeStatus(jobId);
-        setLastPayload(payload);
-        if (payload.state !== lastState) {
-          lastState = payload.state;
-          setLog((prev) => `${prev}\nState: ${payload.state}`);
-        }
-        if (
-          payload.state === "SUCCESS" ||
-          payload.state === "FAILURE" ||
-          payload.state === "REVOKED"
-        ) {
-          setPhase("done");
-          return;
-        }
-        await sleep(1000);
-      }
-      setPhase("error");
-      setLog((prev) => `${prev}\nTimed out after 60s`);
+      const payload = await enqueueWiringSmoke();
+      setLastPayload(payload);
+      setPhase("done");
+      setLog(
+        `Done.\ndb_connected=${payload.db_connected}`,
+      );
     } catch (e) {
       setPhase("error");
       setLog(String(e));
@@ -69,10 +43,8 @@ export function WiringSmoke() {
     <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-neutral-900">Wiring smoke test</h2>
       <p className="mt-1 text-xs text-neutral-500">
-        <code className="rounded bg-neutral-100 px-1">POST /wiring/smoke</code> then poll{" "}
-        <code className="rounded bg-neutral-100 px-1">GET /wiring/smoke/&lt;job_id&gt;</code> — same
-        as <code className="rounded bg-neutral-100 px-1">scripts/wiring_smoke_test.py</code>.
-        Requires a running <strong>Celery worker</strong>.
+        <code className="rounded bg-neutral-100 px-1">POST /wiring/smoke</code> (in-process Redis
+        + DB connectivity check).
       </p>
       <div className="mt-3 flex gap-2">
         <button

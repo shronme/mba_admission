@@ -12,6 +12,7 @@ from urllib.parse import quote
 
 from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
+from app.core.job_runner import JobType, job_runner
 from app.core.storage import get_storage_backend, storage_key_for_upload
 from app.db.enums import DocumentType, FileStatus
 from app.db.models.files import UploadedFile
@@ -155,12 +156,10 @@ async def upload_files(
     await session.commit()
 
     # Enqueue background processing for every successfully stored file.
-    from app.workers.tasks.document_processing import process_uploaded_document
-
     for f in uploaded:
         if f.status == FileStatus.UPLOADING:
             try:
-                process_uploaded_document.delay(str(f.id))
+                job_runner.enqueue(JobType.PROCESS_UPLOADED_DOCUMENT, {"file_id": str(f.id)})
                 logger.info("files_upload task_enqueued file_id=%s", f.id)
             except Exception:
                 logger.exception(

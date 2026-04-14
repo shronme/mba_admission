@@ -379,10 +379,9 @@ async def review_profile_completeness(
     attrs = dict(profile.attributes or {}) if profile is not None else {}
     stored_score = int(profile.completeness_score) if profile is not None else 0
 
-    use_openai = (
-        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-        and bool(os.getenv("OPENAI_API_KEY"))
-    )
+    from app.core.dspy_runtime import openai_calls_enabled
+
+    use_openai = openai_calls_enabled()
     is_complete, gaps, synthesized, score = run_profile_agent(
         attrs, use_openai=use_openai, min_score=stored_score
     )
@@ -442,10 +441,9 @@ async def submit_profile_gap_answers(
     attrs = dict(profile.attributes or {}) if profile is not None else dict(updates)
     stored_score = int(profile.completeness_score) if profile is not None else 0
 
-    use_openai = (
-        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-        and bool(os.getenv("OPENAI_API_KEY"))
-    )
+    from app.core.dspy_runtime import openai_calls_enabled
+
+    use_openai = openai_calls_enabled()
     is_complete, gaps, synthesized, score = run_profile_agent(
         attrs, use_openai=use_openai, min_score=stored_score
     )

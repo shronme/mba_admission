@@ -43,12 +43,12 @@ python scripts/seed_task002_demo.py
 
 Use `docker compose up -d postgres` from the repo root if you only need Postgres on `localhost:5432`.
 
-## Task 003 — Celery AI job framework
+## Task 003 — Background job framework (in-process)
 
-- **Base task:** `app/workers/base_task.py` (`AiJobTask` — retries, logging, `on_failure` → `ai_run` FAILED).
+- **Runner:** `app/core/job_runner.py` (in-process queue + worker pool).
 - **Payloads:** `app/workers/payloads.py` (Pydantic; add one model per job type).
-- **Worker DB:** `app/core/sync_db.py`, `app/workers/ai_run_sync.py`.
-- **Sample job:** `POST /jobs/sample-sleep` → `GET /jobs/ai-runs/{id}` (see **[`docs/AI_JOB_FRAMEWORK.md`](docs/AI_JOB_FRAMEWORK.md)**).
+- **DB helpers:** `app/core/sync_db.py`, `app/workers/ai_run_sync.py`.
+- **Sample job:** `POST /jobs/sample-sleep` → `GET /jobs/ai-runs/{id}`.
 
 ### Fake login (candidates)
 

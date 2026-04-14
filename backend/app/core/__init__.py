@@ -1,2 +1,2 @@
-"""Core utilities (configuration, logging, DB, Celery)."""
+"""Core utilities (configuration, logging, DB, background jobs)."""
 

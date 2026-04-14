@@ -42,15 +42,17 @@ class Settings(BaseSettings):
             return "postgresql+asyncpg://" + s[len("postgresql://") :]
         return v
 
-    redis_url: str = Field(default="redis://localhost:6379/0", validation_alias="REDIS_URL")
-
     # FastAPI health checks
     healthcheck_db: bool = Field(default=False, validation_alias="HEALTHCHECK_DB")
-    healthcheck_redis: bool = Field(default=False, validation_alias="HEALTHCHECK_REDIS")
 
-    # Celery
-    celery_task_default_queue: str = Field(
-        default="default", validation_alias="CELERY_TASK_DEFAULT_QUEUE"
+    # In-process job runner (Celery replacement)
+    job_runner_enabled: bool = Field(default=True, validation_alias="JOB_RUNNER_ENABLED")
+    job_runner_concurrency: int = Field(default=2, validation_alias="JOB_RUNNER_CONCURRENCY")
+    job_runner_queue_maxsize: int = Field(
+        default=200, validation_alias="JOB_RUNNER_QUEUE_MAXSIZE"
+    )
+    job_runner_stale_seconds: int = Field(
+        default=15 * 60, validation_alias="JOB_RUNNER_STALE_SECONDS"
     )
 
     # Browser clients (Next.js dev server, deployed web app). Comma-separated origins.
@@ -73,12 +75,6 @@ class Settings(BaseSettings):
             "http://127.0.0.1:3000",
             "http://[::1]:3000",
         ]
-
-    def celery_broker_url(self) -> str:
-        return self.redis_url
-
-    def celery_result_backend(self) -> str:
-        return self.redis_url
 
     def database_url_sync(self) -> str:
         """

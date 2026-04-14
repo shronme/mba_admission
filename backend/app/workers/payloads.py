@@ -1,8 +1,8 @@
 """
-Typed Celery job payloads (Pydantic).
+Typed background job payloads (Pydantic).
 
-Tasks receive JSON-serializable dicts from the broker; validate with
-`Model.model_validate(payload)` at the start of each task.
+Jobs receive JSON-serializable dicts; validate with `Model.model_validate(payload)`
+at the start of each job.
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ class SampleSleepJobPayload(BaseJobPayload):
     sleep_seconds: float = Field(default=1.0, ge=0.0, le=300.0)
     simulate_transient_fail: bool = Field(
         default=False,
-        description="If true, raises ConnectionError on the first attempt to exercise Celery retries.",
+        description="If true, raises ConnectionError to demonstrate a FAILED run.",
     )
 
 
@@ -53,7 +53,7 @@ def merge_request_meta(
     celery_task_id: str,
     correlation_id: str | None,
 ) -> dict[str, Any]:
-    """Attach worker metadata under request['_meta'] for traceability."""
+    """Attach runner metadata under request['_meta'] for traceability."""
 
     base = dict(request) if request else {}
     meta = dict(base.get("_meta") or {})

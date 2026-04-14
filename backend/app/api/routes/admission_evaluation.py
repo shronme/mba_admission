@@ -6,21 +6,18 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-import redis
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_candidate_id_from_bearer_token
-from app.core.celery_app import celery_app
-from app.core.config import settings
+from app.core.job_runner import JobType, job_runner
 from app.core.db import get_db_session
 from app.db.enums import AiRunType
 from app.db.models.candidate import CandidateProfile
 from app.repositories.ai_run_repo import AiRunRepository
 from app.repositories.candidate_repo import CandidateRepository
-from app.workers.tasks.admission_evaluation_task import admission_evaluation_job
 
 logger = logging.getLogger(__name__)
 
@@ -32,26 +29,6 @@ class AdmissionEvaluationStartResponse(BaseModel):
 
     ai_run_id: uuid.UUID
     celery_task_id: str | None = None
-
-
-def _check_broker() -> None:
-    try:
-        redis.Redis.from_url(settings.redis_url).ping()
-    except Exception as e:  # noqa: BLE001
-        logger.warning("admission_eval broker check redis_failed error=%s", str(e))
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "Redis unreachable", "message": str(e)},
-        ) from e
-    try:
-        with celery_app.connection() as conn:
-            conn.ensure_connection(max_retries=1)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("admission_eval broker check celery_failed error=%s", str(e))
-        raise HTTPException(
-            status_code=503,
-            detail={"error": "Celery broker unreachable", "message": str(e)},
-        ) from e
 
 
 @router.post("/start", response_model=AdmissionEvaluationStartResponse)
@@ -104,8 +81,6 @@ async def start_admission_evaluation(
             detail="Admission evaluation already completed.",
         )
 
-    _check_broker()
-
     repo = AiRunRepository(session)
     run = await repo.create_queued(
         candidate_id=candidate_id,
@@ -113,6 +88,7 @@ async def start_admission_evaluation(
         request={
             "kind": "admission_evaluation",
             "correlation_id": cid,
+            "candidate_id": str(candidate_id),
         },
         model_name="admission_evaluation",
     )
@@ -123,12 +99,13 @@ async def start_admission_evaluation(
         "candidate_id": str(candidate_id),
         "correlation_id": cid,
     }
-    async_result = admission_evaluation_job.delay(payload)
-    logger.info(
-        "admission_evaluation enqueued ai_run_id=%s celery_task_id=%s",
-        run.id,
-        async_result.id,
-    )
+    try:
+        job_runner.enqueue(JobType.ADMISSION_EVALUATION, payload)
+    except Exception as e:  # noqa: BLE001
+        logger.exception("admission_evaluation enqueue_failed ai_run_id=%s", run.id)
+        raise HTTPException(status_code=503, detail={"error": "enqueue_failed", "message": str(e)})
+
+    logger.info("admission_evaluation enqueued ai_run_id=%s", run.id)
 
     sels = attrs.get("school_program_selections")
     n_sel = len(sels) if isinstance(sels, list) else 0
@@ -160,5 +137,5 @@ async def start_admission_evaluation(
 
     return AdmissionEvaluationStartResponse(
         ai_run_id=run.id,
-        celery_task_id=async_result.id,
+        celery_task_id=None,
     )

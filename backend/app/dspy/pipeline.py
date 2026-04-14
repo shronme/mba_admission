@@ -176,10 +176,9 @@ def generate_assistant_response(
     When profile_complete=False the IntakeInterviewer conducts a phase-aware interview.
     """
 
-    use_openai = (
-        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-        and bool(os.getenv("OPENAI_API_KEY"))
-    )
+    from app.core.dspy_runtime import openai_calls_enabled
+
+    use_openai = openai_calls_enabled()
 
     user_lower = (user_message or "").lower()
 
@@ -325,10 +324,9 @@ def generate_initial_greeting(
     name_part = f" {candidate_name}" if candidate_name else ""
 
     if profile_complete:
-        use_openai = (
-            (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-            and bool(os.getenv("OPENAI_API_KEY"))
-        )
+        from app.core.dspy_runtime import openai_calls_enabled
+
+        use_openai = openai_calls_enabled()
         research_agent = OpenAIResearchAgent() if use_openai else MockResearchAgent()
         out = run_dspy_module(
             research_agent,

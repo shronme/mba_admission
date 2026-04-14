@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps.auth import get_admin_from_bearer_token
 from app.core.db import get_db_session
+from app.core.job_runner import JobType, job_runner
 from app.core.storage import get_storage_backend, storage_key_for_upload
 from app.db.enums import FileStatus
 from app.db.models.candidate import Candidate
@@ -194,11 +195,10 @@ async def upload_file_for_candidate(
 
     await session.commit()
 
-    from app.workers.tasks.document_processing import process_uploaded_document
     for f in uploaded:
         if f.status == FileStatus.UPLOADING:
             try:
-                process_uploaded_document.delay(str(f.id))
+                job_runner.enqueue(JobType.PROCESS_UPLOADED_DOCUMENT, {"file_id": str(f.id)})
             except Exception:
                 logger.exception("admin_upload task_enqueue_failed file_id=%s", f.id)
 

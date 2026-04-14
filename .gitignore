@@ -11,3 +11,4 @@ out/
 *.tsbuildinfo
 .env*.local
 backend/data/*
+tmp/*

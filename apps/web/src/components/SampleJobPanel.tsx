@@ -6,10 +6,8 @@ import { useOptionalCandidate } from "@/context/SessionContext";
 import {
   enqueueSampleSleep,
   fetchAiRunStatus,
-  fetchCeleryTaskMeta,
   getApiBaseUrl,
   type AiRunStatusPayload,
-  type CeleryTaskMetaPayload,
 } from "@/lib/api";
 
 type Phase = "idle" | "running" | "done" | "error";
@@ -39,9 +37,6 @@ export function SampleJobPanel() {
   }, [loggedInCandidate?.id]);
   const [log, setLog] = useState<string>("(not run)");
   const [lastAiRun, setLastAiRun] = useState<AiRunStatusPayload | null>(null);
-  const [lastCelery, setLastCelery] = useState<CeleryTaskMetaPayload | null>(
-    null,
-  );
 
   const run = useCallback(async () => {
     if (!base) return;
@@ -55,18 +50,16 @@ export function SampleJobPanel() {
     setPhase("running");
     setLog("Enqueueing sample job…");
     setLastAiRun(null);
-    setLastCelery(null);
 
     try {
-      const { ai_run_id: aiRunId, celery_task_id: celeryTaskId } =
-        await enqueueSampleSleep({
-          sleep_seconds: sec,
-          simulate_transient_fail: simulateTransientFail,
-          correlation_id: correlationId || undefined,
-          candidate_id: candidateId.trim() || undefined,
-        });
+      const { ai_run_id: aiRunId } = await enqueueSampleSleep({
+        sleep_seconds: sec,
+        simulate_transient_fail: simulateTransientFail,
+        correlation_id: correlationId || undefined,
+        candidate_id: candidateId.trim() || undefined,
+      });
       setLog(
-        `Enqueued.\nai_run_id=${aiRunId}\ncelery_task_id=${celeryTaskId}\nPolling ai_run…`,
+        `Enqueued.\nai_run_id=${aiRunId}\nPolling ai_run…`,
       );
 
       const deadline = Date.now() + 120_000;
@@ -79,13 +72,6 @@ export function SampleJobPanel() {
           setLog((prev) => `${prev}\nai_run.status: ${ai.status}`);
         }
         if (isTerminalAiRunStatus(ai.status)) {
-          try {
-            const celery = await fetchCeleryTaskMeta(celeryTaskId);
-            setLastCelery(celery);
-            setLog((prev) => `${prev}\nCelery state: ${celery.state}`);
-          } catch {
-            setLog((prev) => `${prev}\n(Celery meta fetch skipped or failed)`);
-          }
           setPhase("done");
           return;
         }
@@ -118,13 +104,12 @@ export function SampleJobPanel() {
   return (
     <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
       <h2 className="text-sm font-semibold text-neutral-900">
-        Sample Celery job (Task 003)
+        Sample background job (Task 003)
       </h2>
       <p className="mt-1 text-xs text-neutral-500">
         <code className="rounded bg-neutral-100 px-1">POST /jobs/sample-sleep</code>{" "}
         then <code className="rounded bg-neutral-100 px-1">GET /jobs/ai-runs/&lt;id&gt;</code>.
-        Needs a running <strong>Celery worker</strong> and <strong>migrated DB</strong> on the API
-        (same as Railway: web runs migrations on boot, worker runs tasks).
+        Runs inside the FastAPI process (no Celery worker).
       </p>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <label className="block text-xs text-neutral-600">
@@ -168,7 +153,7 @@ export function SampleJobPanel() {
             disabled={phase === "running"}
           />
           <span>
-            <strong>simulate_transient_fail</strong> (demo: one retry on first attempt)
+            <strong>simulate_transient_fail</strong> (demo: marks the run FAILED)
           </span>
         </label>
       </div>
@@ -190,14 +175,6 @@ export function SampleJobPanel() {
           <p className="text-xs font-medium text-neutral-600">Last ai_run</p>
           <pre className="mt-1 max-h-48 overflow-auto rounded bg-neutral-100 p-3 text-xs text-neutral-900">
             {JSON.stringify(lastAiRun, null, 2)}
-          </pre>
-        </div>
-      )}
-      {lastCelery !== null && (
-        <div className="mt-2">
-          <p className="text-xs font-medium text-neutral-600">Celery task</p>
-          <pre className="mt-1 max-h-32 overflow-auto rounded bg-neutral-100 p-3 text-xs text-neutral-900">
-            {JSON.stringify(lastCelery, null, 2)}
           </pre>
         </div>
       )}

@@ -26,7 +26,7 @@ class SampleSleepEnqueueBody(BaseModel):
 
 class SampleSleepEnqueueResponse(BaseModel):
     ai_run_id: uuid.UUID
-    celery_task_id: str
+    celery_task_id: str | None = None
 
 
 class AiRunStatusRead(BaseModel):

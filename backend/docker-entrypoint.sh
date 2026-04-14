@@ -3,7 +3,7 @@ set -e
 
 # Single image: select process via env (Railway / compose set per service).
 # - web: Alembic migrate (unless skipped) + FastAPI (honours Railway PORT)
-# - worker: Celery worker (does not run migrations — avoid concurrent upgrades)
+# - worker: (removed) Celery no longer used; background jobs run in-process
 ROLE="${APP_ROLE:-web}"
 
 case "$ROLE" in
@@ -34,12 +34,8 @@ print('pgvector extension ready')
     fi
     ;;
   worker)
-    if [ "${ENV:-}" = "development" ]; then
-      exec watchmedo auto-restart --directory=./app --pattern="*.py" --recursive -- \
-        celery -A app.core.celery_app:celery_app worker -l info
-    else
-      exec celery -A app.core.celery_app:celery_app worker -l info
-    fi
+    echo "docker-entrypoint: APP_ROLE=worker is no longer supported (Celery removed). Use APP_ROLE=web." >&2
+    exit 1
     ;;
   *)
     echo "docker-entrypoint: unknown APP_ROLE='$ROLE' (use 'web' or 'worker')" >&2

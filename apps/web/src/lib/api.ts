@@ -779,7 +779,7 @@ export async function fetchHealth(): Promise<unknown> {
   });
 }
 
-export async function enqueueWiringSmoke(): Promise<{ job_id: string }> {
+export async function enqueueWiringSmoke(): Promise<WiringSmokePayload> {
   const root = getApiBaseUrl();
   if (!root) {
     throw new Error(
@@ -804,30 +804,23 @@ export async function enqueueWiringSmoke(): Promise<{ job_id: string }> {
       `POST /wiring/smoke failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
     );
   }
-  const jobId =
-    typeof data === "object" &&
-    data !== null &&
-    "job_id" in data &&
-    typeof (data as { job_id: unknown }).job_id === "string"
-      ? (data as { job_id: string }).job_id
-      : null;
-  if (!jobId) {
-    throw new Error(`POST /wiring/smoke: missing job_id in ${text}`);
-  }
-  return { job_id: jobId };
+  const obj = data as Record<string, unknown>;
+  const dbConnected = Boolean(obj.db_connected);
+  return {
+    db_connected: dbConnected,
+    select_one: obj.select_one,
+  };
 }
 
-export type WiringSmokeStatusPayload = {
-  job_id: string;
-  state: string;
-  result?: unknown;
-  error?: unknown;
+export type WiringSmokePayload = {
+  db_connected: boolean;
+  select_one?: unknown;
 };
 
 /** Task 003 — POST /jobs/sample-sleep */
 export type SampleSleepEnqueueResponse = {
   ai_run_id: string;
-  celery_task_id: string;
+  celery_task_id: string | null;
 };
 
 export async function enqueueSampleSleep(body: {
@@ -874,8 +867,8 @@ export async function enqueueSampleSleep(body: {
   const aiRunId = typeof obj.ai_run_id === "string" ? obj.ai_run_id : null;
   const celeryTaskId =
     typeof obj.celery_task_id === "string" ? obj.celery_task_id : null;
-  if (!aiRunId || !celeryTaskId) {
-    throw new Error(`POST /jobs/sample-sleep: missing ids in ${text}`);
+  if (!aiRunId) {
+    throw new Error(`POST /jobs/sample-sleep: missing ai_run_id in ${text}`);
   }
   return { ai_run_id: aiRunId, celery_task_id: celeryTaskId };
 }
@@ -948,32 +941,6 @@ export async function fetchCeleryTaskMeta(
   }
   if (!res.ok) {
     throw new Error(`GET /jobs/celery/${taskId} failed: ${res.status} ${text}`);
-  }
-  return data;
-}
-
-export async function fetchWiringSmokeStatus(
-  jobId: string,
-): Promise<WiringSmokeStatusPayload> {
-  const root = getApiBaseUrl();
-  if (!root) {
-    throw new Error(
-      "NEXT_PUBLIC_API_URL is not set. Copy apps/web/.env.example to apps/web/.env.local",
-    );
-  }
-  const res = await fetch(
-    `${root}/wiring/smoke/${encodeURIComponent(jobId)}`,
-    { method: "GET", cache: "no-store" },
-  );
-  const text = await res.text();
-  let data: WiringSmokeStatusPayload;
-  try {
-    data = text ? JSON.parse(text) : ({} as WiringSmokeStatusPayload);
-  } catch {
-    throw new Error(`GET /wiring/smoke/${jobId}: invalid JSON (${res.status})`);
-  }
-  if (!res.ok) {
-    throw new Error(`GET /wiring/smoke/${jobId} failed: ${res.status} ${text}`);
   }
   return data;
 }

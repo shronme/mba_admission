@@ -11933,5 +11933,575 @@
         "notes": null
       }
     ]
+  },
+  "school_rankings": {
+    "system": "U.S. News & World Report — Best National Universities",
+    "cycle_year": 2026,
+    "entries": {
+      "Princeton University": {
+        "rank": 1,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Massachusetts Institute of Technology (MIT)": {
+        "rank": 2,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Harvard University": {
+        "rank": 3,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Stanford University": {
+        "rank": 4,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 4"
+      },
+      "Yale University": {
+        "rank": 4,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Rank from [4][5]"
+      },
+      "University of Chicago": {
+        "rank": 6,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "Duke University": {
+        "rank": 7,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Johns Hopkins University": {
+        "rank": 7,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Northwestern University": {
+        "rank": 7,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "University of Pennsylvania": {
+        "rank": 7,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "California Institute of Technology (Caltech)": {
+        "rank": 11,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Cornell University": {
+        "rank": 12,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Brown University": {
+        "rank": 13,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Dartmouth College": {
+        "rank": 13,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Columbia University": {
+        "rank": 15,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "University of California, Berkeley": {
+        "rank": 15,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 15"
+      },
+      "Rice University": {
+        "rank": 17,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": null
+      },
+      "University of California, Los Angeles (UCLA)": {
+        "rank": 17,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 17"
+      },
+      "Vanderbilt University": {
+        "rank": 17,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Rank from [4]"
+      },
+      "Carnegie Mellon University": {
+        "rank": 20,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "University of Michigan – Ann Arbor": {
+        "rank": 20,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "University of Notre Dame": {
+        "rank": 20,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "Washington University in St. Louis": {
+        "rank": 20,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Tied rank from [4][5]"
+      },
+      "Emory University": {
+        "rank": 24,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Georgetown University": {
+        "rank": 24,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "University of North Carolina – Chapel Hill": {
+        "rank": 26,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "University of Virginia": {
+        "rank": 26,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Tied rank from [4][5]"
+      },
+      "University of Southern California": {
+        "rank": 28,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Rank from [4]"
+      },
+      "University of California, San Diego (UCSD)": {
+        "rank": 29,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "University of Florida": {
+        "rank": 30,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 30"
+      },
+      "University of Texas at Austin": {
+        "rank": 30,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Rank from [4]"
+      },
+      "Georgia Institute of Technology": {
+        "rank": 32,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "New York University (NYU)": {
+        "rank": 32,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "University of California, Davis": {
+        "rank": 32,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 32"
+      },
+      "Tufts University": {
+        "rank": 36,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": "Tied at rank 36"
+      },
+      "University of Illinois at Urbana-Champaign": {
+        "rank": 36,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "University of Wisconsin – Madison": {
+        "rank": 36,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Tied rank from [4][5]"
+      },
+      "University of California, Santa Barbara (UCSB)": {
+        "rank": 40,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.ivycoach.com/the-ivy-coach-blog/college-admissions/2026-college-rankings/",
+        "notes": null
+      },
+      "Ohio State University": {
+        "rank": 41,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Boston University": {
+        "rank": 42,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "Rutgers University": {
+        "rank": 42,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Listed as Rutgers University–New Brunswick"
+      },
+      "University of Washington": {
+        "rank": 42,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Tied rank from [4]"
+      },
+      "Purdue University": {
+        "rank": 46,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": "https://www.collegekickstart.com/blog/item/u-s-news-world-report-posts-2026-college-rankings",
+        "notes": null
+      },
+      "American University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Baylor University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Binghamton University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Brandeis University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Case Western Reserve University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Clemson University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "College of William & Mary": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Colorado School of Mines": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Drexel University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Florida International University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Florida State University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Fordham University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "George Washington University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Howard University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Indiana University Bloomington": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Marquette University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Michigan State University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "New Jersey Institute of Technology": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "North Carolina State University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Pennsylvania State University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Pepperdine University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Rensselaer Polytechnic Institute": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Rochester Institute of Technology": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in primary source top 50; further ranking data needed"
+      },
+      "Santa Clara University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Southern Methodist University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Stevens Institute of Technology": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Stony Brook University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Syracuse University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Texas A&M University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Texas Christian University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "Tulane University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University at Buffalo": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of California, Merced": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of California, Riverside": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of California, Santa Cruz": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of Colorado Boulder": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of Connecticut": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of Delaware": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of Illinois Chicago": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in provided search results or primary source data"
+      },
+      "University of Maryland – College Park": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of Massachusetts Amherst": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of Miami": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of Minnesota – Twin Cities": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of Pittsburgh": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of Rochester": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "University of South Florida": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "Villanova University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "Virginia Tech": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "Wake Forest University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "Worcester Polytechnic Institute": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      },
+      "Yeshiva University": {
+        "rank": null,
+        "source": "U.S. News & World Report — Best National Universities 2026",
+        "evidence_url": null,
+        "notes": "Not found in top rankings of primary or fallback sources"
+      }
+    }
   }
 }

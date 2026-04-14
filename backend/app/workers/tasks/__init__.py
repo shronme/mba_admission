@@ -1,2 +1,2 @@
-"""Celery tasks package."""
+"""Background job functions (in-process runner)."""
 

@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 
-from app.core.celery_app import celery_app
 from app.core.sync_db import sync_session_scope
 from app.db.enums import AiRunStatus, CandidateStage
 from app.db.models.candidate import Candidate, CandidateProfile
@@ -24,7 +24,6 @@ from app.workers.ai_run_sync import (
     mark_ai_run_running,
     mark_ai_run_succeeded,
 )
-from app.workers.base_task import AiJobTask, attach_worker_meta_to_ai_run
 from app.workers.payloads import AdmissionEvaluationJobPayload
 from app.workers.profile_attributes_sync import merge_profile_attributes_sync
 
@@ -102,14 +101,8 @@ def json_dossier(d: dict[str, Any]) -> str:
         return str(d)[:24000]
 
 
-@celery_app.task(bind=True, base=AiJobTask, name="app.jobs.admission_evaluation")
-def admission_evaluation_job(self, payload: dict) -> dict:
+def admission_evaluation_job(payload: dict) -> dict:
     data = AdmissionEvaluationJobPayload.model_validate(payload)
-    attach_worker_meta_to_ai_run(
-        ai_run_id=data.ai_run_id,
-        celery_task_id=self.request.id,
-        correlation_id=data.correlation_id,
-    )
 
     with sync_session_scope() as session:
         run = get_ai_run(session, data.ai_run_id)
@@ -246,28 +239,65 @@ def admission_evaluation_job(self, payload: dict) -> dict:
 
         selected_keys = {(str(s.get("school")), str(s.get("program_slug"))) for s in selections}
 
-        any_low = any(int(r.get("admission_chance_1_100") or 0) < 85 for r in primary_rows)
-        extras: list[dict[str, str]] = []
-        if any_low:
-            extras = aes.pick_similar_programs(
-                primary_evaluations=primary_rows,
-                selected_keys=selected_keys,
-                max_programs=3,
-            )
+        # Additional recommendations:
+        # - only for weak primary programs (<85)
+        # - only from ranked schools that offer the same program_slug
+        # - randomized among ranked candidates
+        # - accept up to 2 whose admission chance beats the baseline for that slug
+        weak_slugs: list[str] = []
+        baseline_by_slug: dict[str, int] = {}
+        for row in primary_rows:
+            slug = str(row.get("program_slug") or "").strip()
+            if not slug:
+                continue
+            try:
+                ch = int(row.get("admission_chance_1_100") or 0)
+            except (TypeError, ValueError):
+                ch = 0
+            baseline_by_slug[slug] = max(baseline_by_slug.get(slug, 0), ch)
+            if ch < 85 and slug not in weak_slugs:
+                weak_slugs.append(slug)
 
-        n_extra = len(extras)
-        if n_extra:
-            for j, ex in enumerate(extras):
+        if weak_slugs:
+            rng = random.Random(str(data.ai_run_id))
+
+            # Build a diversified randomized candidate list by round-robin across slugs.
+            per_slug: dict[str, list[dict[str, str]]] = {}
+            for slug in weak_slugs:
+                per_slug[slug] = aes.ranked_random_program_candidates(
+                    program_slug=slug,
+                    selected_keys=selected_keys,
+                    rng=rng,
+                    max_programs=None,
+                )
+
+            candidate_queue: list[dict[str, str]] = []
+            still = True
+            while still:
+                still = False
+                for slug in weak_slugs:
+                    rows = per_slug.get(slug) or []
+                    if rows:
+                        candidate_queue.append(rows.pop(0))
+                        still = True
+
+            max_attempts = min(25, len(candidate_queue))
+            # Guardrail: don't surface "recommendations" with very low absolute chance,
+            # even if they're marginally better than baseline.
+            MIN_RECOMMENDED_CHANCE_1_100 = 50
+
+            qualifying: list[tuple[int, dict[str, Any]]] = []
+
+            for attempt_idx in range(max_attempts):
+                ex = candidate_queue[attempt_idx]
                 school = ex["school"]
                 slug = ex["program_slug"]
                 label = ex["program_display_name"]
-                pct_base = 82 + int(15 * j / max(1, n_extra))
+                baseline = int(baseline_by_slug.get(slug, 0))
 
-                def commit_extra(
-                    msg: str,
-                    sub: str,
-                    prog: int,
-                ) -> None:
+                pct_base = 82 + int(15 * attempt_idx / max(1, max_attempts))
+
+                def commit_extra(msg: str, sub: str, prog: int) -> None:
                     with sync_session_scope() as s:
                         _persist_job(
                             s,
@@ -278,8 +308,8 @@ def admission_evaluation_job(self, payload: dict) -> dict:
                                 current_school=school,
                                 current_program_display_name=label,
                                 current_program_slug=slug,
-                                program_index=j,
-                                programs_total=n_extra,
+                                program_index=attempt_idx,
+                                programs_total=max_attempts,
                                 substep=sub,
                                 phase_scope="extra",
                                 progress_percent=min(99, prog),
@@ -287,13 +317,23 @@ def admission_evaluation_job(self, payload: dict) -> dict:
                             ),
                         )
 
-                commit_extra(f"Researching alternative: {school}…", "research", pct_base)
+                commit_extra(
+                    f"Researching alternative: {school}…",
+                    "research",
+                    pct_base,
+                )
                 dossier = aes.research_program_dossier(
-                    school=school, program_label=label, cycle_year=cycle_year
+                    school=school,
+                    program_label=label,
+                    cycle_year=cycle_year,
                 )
                 notes = json_dossier(dossier)
                 if not aes.dossier_sufficient(dossier):
-                    commit_extra(f"Gathering more sources for {school}…", "supplement", pct_base + 2)
+                    commit_extra(
+                        f"Gathering more sources for {school}…",
+                        "supplement",
+                        pct_base + 2,
+                    )
                     sup = aes.supplement_with_openai(
                         school=school,
                         program_label=label,
@@ -301,6 +341,7 @@ def admission_evaluation_job(self, payload: dict) -> dict:
                         prior_summary=notes,
                     )
                     notes = notes + "\n\n" + sup
+
                 commit_extra(f"Evaluating {school}…", "evaluate", pct_base + 5)
                 ex_ev = aes.evaluate_extra_program_json(
                     school=school,
@@ -309,7 +350,18 @@ def admission_evaluation_job(self, payload: dict) -> dict:
                     dossier=dossier,
                     candidate_profile_text=profile_text + "\n\nResearch notes:\n" + notes[:16000],
                 )
-                extra_rows.append(ex_ev)
+
+                try:
+                    ex_ch = int(ex_ev.get("admission_chance_1_100") or 0)
+                except (TypeError, ValueError):
+                    ex_ch = 0
+
+                if ex_ch > baseline and ex_ch >= MIN_RECOMMENDED_CHANCE_1_100:
+                    qualifying.append((ex_ch, ex_ev))
+
+            if qualifying:
+                qualifying.sort(key=lambda t: t[0], reverse=True)
+                extra_rows.extend([row for _, row in qualifying[:2]])
 
         result = {
             "status": "complete",

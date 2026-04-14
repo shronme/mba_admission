@@ -20,6 +20,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.wiring_smoke import router as wiring_smoke_router
 from app.core.config import settings
+from app.core.job_runner import attach_job_runner
 from app.core.logging import configure_logging, reset_log_context, set_log_context
 from app.core.phoenix import configure_phoenix_tracing
 
@@ -121,6 +122,8 @@ def create_app() -> FastAPI:
     app.include_router(files_router)
     app.include_router(jobs_router)
     app.include_router(wiring_smoke_router)
+
+    attach_job_runner(app)
 
     # Minimal static “mock FE” (same origin as API — no CORS).
     mock_fe_dir = Path(__file__).resolve().parent.parent / "static" / "mock_fe"

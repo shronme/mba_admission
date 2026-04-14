@@ -25,7 +25,6 @@ import uuid
 
 from sqlalchemy import select
 
-from app.core.celery_app import celery_app
 from app.core.sync_db import sync_session_scope
 from app.db.models.candidate import CandidateProfile
 from app.db.models.files import UploadedFile
@@ -136,24 +135,13 @@ def _post_profile_complete_notification(candidate_id: uuid.UUID) -> None:
     _post_chat_message(candidate_id, content)
 
 
-@celery_app.task(
-    bind=True,
-    name="app.jobs.update_profile_from_document",
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
-    retry_kwargs={"max_retries": 3, "countdown": 15},
-    retry_backoff=True,
-    retry_jitter=True,
-)
-def update_profile_from_document(self, file_id: str) -> dict:
+def update_profile_from_document(file_id: str) -> dict:
     file_uuid = uuid.UUID(file_id)
-    logger.info(
-        "profile_update start file_id=%s retries=%s", file_id, self.request.retries
-    )
+    logger.info("profile_update start file_id=%s", file_id)
 
-    use_openai = (
-        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-        and bool(os.getenv("OPENAI_API_KEY"))
-    )
+    from app.core.dspy_runtime import openai_calls_enabled
+
+    use_openai = openai_calls_enabled()
 
     # --- 1. Load file record ---
     with sync_session_scope() as session:

@@ -358,10 +358,9 @@ async def stream_assistant_response(
                     candidate_repo = CandidateRepository(session)
                     if profile_updates:
                         await candidate_repo.merge_profile_attributes(candidate_id, profile_updates)
-                        use_openai_norm = (
-                            (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-                            and bool(os.getenv("OPENAI_API_KEY"))
-                        )
+                        from app.core.dspy_runtime import openai_calls_enabled
+
+                        use_openai_norm = openai_calls_enabled()
                         if use_openai_norm:
                             prof_row = (
                                 await session.execute(

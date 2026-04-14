@@ -2,7 +2,6 @@
 
 This doc explains how to deploy the backend skeleton on Railway using:
 - FastAPI web process (`uvicorn`)
-- Celery worker process (`celery worker`)
 - Managed Postgres + Redis services
 
 ## 0) Builder: use Docker (not Railpack)
@@ -10,10 +9,7 @@ New Railway services default to **Railpack**, which often **cannot** infer this 
 
 This repo includes **`railway.toml` at the repository root** with `builder = "DOCKERFILE"` and `dockerfilePath = "backend/Dockerfile"`, so **web** and **worker** services pick up the same Docker build as `docker-compose` (build context = repo root).
 
-**Important — healthchecks:** the **Celery worker is not an HTTP server**. Railway must **not** probe `GET /health` on the worker (you will see *service unavailable* / *replicas never became healthy*). Only the **web** service should use an HTTP healthcheck.
-
-- **Worker:** use default **`railway.toml`** (no `[deploy]` healthcheck), or in the dashboard clear **Healthcheck path** / disable HTTP healthcheck if Railway still shows one.
-- **Web (FastAPI):** either set **Deploy → Healthcheck path** to `/health` in the dashboard, **or** set that service’s config file to **`railway.web.toml`** (includes `healthcheckPath = "/health"`).
+**Healthchecks:** only the **web** service should use an HTTP healthcheck (e.g. `/health`).
 
 **Next.js (`apps/web`):** separate Railway service — step-by-step in **[`apps/web/README.md`](../apps/web/README.md#deploy-on-railway)** (root directory `apps/web`, `NEXT_PUBLIC_API_URL`, CORS on the API).
 
@@ -24,8 +20,7 @@ This repo includes **`railway.toml` at the repository root** with `builder = "DO
 2. Make sure your Railway project can connect to Docker builds from this repository.
 
 ## 2) Add managed services
-1. Add a **Redis** service to the Railway project.
-2. Add a **Postgres** service to the Railway project.
+1. Add a **Postgres** service to the Railway project.
 3. **(Recommended for uploads)** Add a Railway **Storage Bucket** — private, **S3-compatible** object storage for file bytes. Postgres should only store **`uploaded_files` metadata** (filename, size, `storage_uri`, status); the API uploads/downloads via the S3 API using credentials from the bucket’s **Credentials** tab. See Railway’s guide: **[Storage Buckets](https://docs.railway.com/guides/storage-buckets)**.
 
    Typical env vars (names vary slightly in the dashboard; mirror them into your **web** service): bucket name, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`, `REGION`, and S3 **`ENDPOINT`** (Railway uses an S3-compatible endpoint, not AWS’s default). Buckets are **private** by default — use **presigned GET/PUT URLs** from FastAPI rather than exposing the bucket publicly.
@@ -33,25 +28,12 @@ This repo includes **`railway.toml` at the repository root** with `builder = "DO
 ## 3) Configure environment variables
 The backend reads these variables (see `backend/app/core/config.py`):
 1. `DATABASE_URL` (asyncpg required)
-2. `REDIS_URL`
-3. Optional: `LOG_LEVEL`, `ENV`
+2. Optional: `LOG_LEVEL`, `ENV`
 
 ### DATABASE_URL format note (async SQLAlchemy)
 Railway’s Postgres URL is often `postgres://...` or `postgresql://...` **without** a driver.
 
 The backend **auto-normalizes** those to `postgresql+asyncpg://...` when settings load (see `normalize_database_url_for_asyncpg` in `backend/app/core/config.py`). You can still set `DATABASE_URL` to `postgresql+asyncpg://...` yourself if you prefer.
-
-### REDIS_URL format
-Set `REDIS_URL` to the Redis connection string Railway provides, typically in the form:
-- `redis://default:password@host:port/0`
-
-Celery uses Redis for both broker and result backend in this skeleton.
-
-**Optional but recommended (Celery env precedence):** set these on **both** `web` and `worker` to the same Redis URL Railway gives you (mirrors `REDIS_URL`):
-- `CELERY_BROKER_URL`
-- `CELERY_RESULT_BACKEND`
-
-Celery may read `CELERY_BROKER_URL` from the environment; if it points at `localhost` while the app runs in a container, enqueue will fail with `Connection refused`.
 
 ### Database migrations (Alembic — Task 002)
 Schema is managed with **Alembic** (`backend/alembic/`, `backend/alembic.ini`). The image includes these files.
@@ -81,8 +63,8 @@ alembic revision --autogenerate -m "describe change"
    - Dockerfile: `backend/Dockerfile`
 2. Build context should include the `backend/` directory (in most setups, using the repo root as context is fine).
 
-## 5) Configure processes (web + worker)
-Use **two Railway services** from the **same repo + same Dockerfile** (`backend/Dockerfile`). The image uses [`docker-entrypoint.sh`](docker-entrypoint.sh): the role is selected with **`APP_ROLE`**, so you do **not** need different start commands in the dashboard unless you prefer to override them.
+## 5) Configure process (web)
+Use **one Railway service** from the **same repo + same Dockerfile** (`backend/Dockerfile`). The image uses [`docker-entrypoint.sh`](docker-entrypoint.sh).
 
 ### Process A: `web` service
 1. **Variables:** set `APP_ROLE=web` (optional if you rely on the default `web` in the entrypoint).
@@ -90,13 +72,6 @@ Use **two Railway services** from the **same repo + same Dockerfile** (`backend/
 3. **Custom Start Command:** leave **empty** so Docker’s `ENTRYPOINT` runs (recommended), *or* set the same as local:  
    `./docker-entrypoint.sh`  
    (only needed if your platform replaces `ENTRYPOINT`; on Railway, empty is usually fine.)
-
-### Process B: `worker` service
-1. **Variables:** set `APP_ROLE=worker`.
-2. **Custom Start Command:** leave **empty** (use image `ENTRYPOINT`).
-3. Do **not** assign a public domain to this service.
-
-Same **`DATABASE_URL` / `REDIS_URL` / `CELERY_*`** as the web service (see §3).
 
 ## 6) Deploy
 Deploy the Railway service(s).
@@ -113,17 +88,12 @@ Open `https://<your-web-host>/fe/` — a tiny static page calls `/health` and th
 ```
 
 ### C) Wiring smoke test endpoints
-After the worker is running, verify cross-component wiring using:
-- `POST /wiring/smoke` -> returns a `job_id`
-- `GET /wiring/smoke/{job_id}` -> returns `{ state, result }` when complete
+Verify cross-component wiring using:
+- `POST /wiring/smoke` -> returns `{ redis_connected, db_connected, select_one }`
 
 You can test quickly with `curl`:
 ```sh
 curl -s -X POST "$WEB_URL/wiring/smoke" -H "Content-Type: application/json"
-```
-Then poll:
-```sh
-curl -s "$WEB_URL/wiring/smoke/<job_id>"
 ```
 
 Expected `result` includes:
@@ -134,6 +104,5 @@ Expected `result` includes:
 ## 8) Local parity (recommended)
 For local development, use `docker compose up -d redis postgres`, then:
 - Terminal 1 (web): `uvicorn app.main:app --host 0.0.0.0 --port 8000`
-- Terminal 2 (worker): `celery -A app.core.celery_app worker -l info`
 - Smoke test: `python scripts/wiring_smoke_test.py`
 

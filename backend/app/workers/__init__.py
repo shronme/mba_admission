@@ -1,2 +1,2 @@
-"""Celery worker package."""
+"""Background job helpers (in-process runner)."""
 

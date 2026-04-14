@@ -15,6 +15,27 @@ tracer = trace.get_tracer(__name__)
 _configured = False
 
 
+def openai_calls_enabled() -> bool:
+    """
+    Return True when the app should attempt OpenAI-backed DSPy modules.
+
+    Historical footgun:
+    - Many call sites used `(DSPY_MODE or "mock") == "openai"` as a guard.
+    - In deployments where OPENAI_API_KEY is set but DSPY_MODE is unset, this
+      silently forced mock mode and made quality scores look "much lower" than
+      expected.
+
+    Rule:
+    - If DSPY_MODE is explicitly "mock" → never call OpenAI.
+    - Otherwise, if OPENAI_API_KEY is present → allow OpenAI calls.
+    """
+
+    mode = (os.getenv("DSPY_MODE") or "").strip().lower()
+    if mode == "mock":
+        return False
+    return bool((os.getenv("OPENAI_API_KEY") or "").strip())
+
+
 def configure_dspy_from_env() -> None:
     """
     Configure DSPy from environment variables.
@@ -35,7 +56,9 @@ def configure_dspy_from_env() -> None:
     if _configured:
         return
 
-    mode = (os.getenv("DSPY_MODE") or "mock").lower()
+    # If the API key is present, default to OpenAI unless the operator explicitly
+    # forced mock mode (DSPY_MODE=mock). This matches expected production behavior.
+    mode = (os.getenv("DSPY_MODE") or ("openai" if (os.getenv("OPENAI_API_KEY") or "").strip() else "mock")).lower()
     model = os.getenv("DSPY_MODEL") or "openai/gpt-4o-mini"
     openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
     perplexity_key = (
@@ -65,6 +88,16 @@ def configure_dspy_from_env() -> None:
             )
             _configured = True
             return
+        # Perplexity's OpenAI-compatible API does not accept some newer OpenAI parameters
+        # (notably structured `response_format`) that DSPy/LiteLLM may include. Ask LiteLLM
+        # to drop unsupported params instead of failing the request.
+        try:
+            import litellm  # type: ignore[import-not-found]
+
+            if hasattr(litellm, "drop_params"):
+                litellm.drop_params = True
+        except Exception:  # noqa: BLE001 - best-effort compatibility
+            pass
         base = (os.getenv("PERPLEXITY_BASE_URL") or os.getenv("PERPLEXITY_API_BASE") or "").strip()
         try:
             lm = (

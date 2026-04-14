@@ -1,9 +1,9 @@
 """
-Synchronous SQLAlchemy engine/session for **Celery workers**.
+Synchronous SQLAlchemy engine/session.
 
-The FastAPI app uses async SQLAlchemy (`app.core.db`); workers use psycopg via
-`settings.database_url_sync()` so tasks can update ORM models without nesting
-`asyncio.run()` for every DB call.
+The FastAPI app uses async SQLAlchemy (`app.core.db`) for request handling, but
+some background jobs (and compatibility helpers) still use a synchronous session
+via `settings.database_url_sync()`.
 """
 
 from __future__ import annotations

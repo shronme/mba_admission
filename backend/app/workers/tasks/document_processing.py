@@ -20,7 +20,6 @@ import os
 import uuid
 import zipfile
 
-from app.core.celery_app import celery_app
 from app.core.sync_db import sync_session_scope
 from app.db.enums import DocumentType, FileStatus
 from app.db.models.files import UploadedFile
@@ -254,10 +253,9 @@ def _extract_text(
 # ---------------------------------------------------------------------------
 
 def _classify_document(text: str) -> DocumentType:
-    use_openai = (
-        (os.getenv("DSPY_MODE") or "mock").lower() == "openai"
-        and bool(os.getenv("OPENAI_API_KEY"))
-    )
+    from app.core.dspy_runtime import openai_calls_enabled
+
+    use_openai = openai_calls_enabled()
 
     snippet = text[:_CLASSIFY_MAX_CHARS]
 
@@ -333,20 +331,12 @@ def _post_chat_notification(*, candidate_id: uuid.UUID, filename: str, doc_type:
 
 
 # ---------------------------------------------------------------------------
-# Celery task
+# In-process background job
 # ---------------------------------------------------------------------------
 
-@celery_app.task(
-    bind=True,
-    name="app.jobs.process_uploaded_document",
-    autoretry_for=(ConnectionError, TimeoutError, OSError),
-    retry_kwargs={"max_retries": 3, "countdown": 15},
-    retry_backoff=True,
-    retry_jitter=True,
-)
-def process_uploaded_document(self, file_id: str) -> dict:
+def process_uploaded_document(file_id: str) -> dict:
     file_uuid = uuid.UUID(file_id)
-    logger.info("doc_processing start file_id=%s retries=%s", file_id, self.request.retries)
+    logger.info("doc_processing start file_id=%s", file_id)
 
     # --- 1. Load file record ---
     with sync_session_scope() as session:
@@ -420,12 +410,6 @@ def process_uploaded_document(self, file_id: str) -> dict:
             filename=original_filename,
             doc_type=doc_type,
         )
-
-        # --- 8. Chain async profile update task (runs independently after this task completes) ---
-        from app.workers.tasks.profile_update import update_profile_from_document
-
-        update_profile_from_document.delay(file_id)
-        logger.info("doc_processing profile_update_enqueued file_id=%s", file_id)
 
         logger.info("doc_processing done file_id=%s doc_type=%s", file_id, doc_type)
         return {"status": "ok", "file_id": file_id, "document_type": doc_type.value}
