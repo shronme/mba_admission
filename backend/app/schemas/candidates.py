@@ -90,6 +90,12 @@ class CandidateIntakeUpdate(BaseModel):
         max_length=4,
         description="Up to 4 (school, program) selections. First entry drives program_type.",
     )
+    undergrad_gpa: float | None = Field(
+        default=None,
+        ge=0,
+        le=4,
+        description="Optional undergraduate GPA on a 0.0–4.0 scale (stored in profile.attributes).",
+    )
 
     # Derived/legacy fields used internally by routes + DB mapping.
     # Keep these for backward compatibility and for downstream code that expects them.

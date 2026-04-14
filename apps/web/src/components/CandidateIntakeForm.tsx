@@ -121,6 +121,7 @@ function buildIntakeStep1Payload(
   isoDob: string,
   pairs: IntakeSchoolProgramSelectionPayload[],
   intakeTestScores: IntakeTestScoresPayload,
+  undergradGpa: string,
 ): CandidateIntakePayload {
   return {
     full_name: fullName,
@@ -128,6 +129,7 @@ function buildIntakeStep1Payload(
     date_of_birth: isoDob,
     school_program_selections: pairs,
     intake_test_scores: intakeTestScores,
+    undergrad_gpa: floatOrNull(undergradGpa),
   };
 }
 
@@ -364,6 +366,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const [fullName, setFullName] = useState(initialFullName);
   const [country, setCountry] = useState("");
   const [dob, setDob] = useState<Date | undefined>(undefined);
+  const [undergradGpa, setUndergradGpa] = useState("");
   const [pairs, setPairs] = useState<SchoolProgramPairUi[]>([
     { id: "1", school: "", schoolOther: "", programSlug: "", programOther: "" },
   ]);
@@ -413,9 +416,9 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const debugEnabled =
     typeof window !== "undefined" &&
     (process.env.NEXT_PUBLIC_DEBUG_INTAKE === "1" || process.env.NODE_ENV !== "production");
-  const debug = (...args: unknown[]) => {
+  const debug = useCallback((...args: unknown[]) => {
     if (debugEnabled) console.debug("[intake]", ...args);
-  };
+  }, [debugEnabled]);
 
   const scoreCategory = useMemo(
     () => {
@@ -519,7 +522,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     return () => {
       cancelled = true;
     };
-  }, [sessionToken]);
+  }, [debug, sessionToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -532,6 +535,10 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
         if (p?.country_of_residence) setCountry(p.country_of_residence);
         if (p?.date_of_birth) setDob(new Date(p.date_of_birth));
         const attrs = p?.attributes ?? null;
+        if (attrs && typeof attrs === "object" && !Array.isArray(attrs)) {
+          const g = (attrs as any).undergrad_gpa;
+          setUndergradGpa(typeof g === "number" ? String(g) : "");
+        }
         const rawPairs = (attrs as any)?.school_program_selections;
         if (Array.isArray(rawPairs) && rawPairs.length) {
           const parsed: SchoolProgramPairUi[] = rawPairs
@@ -581,7 +588,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     return () => {
       cancelled = true;
     };
-  }, [sessionToken]);
+  }, [debug, sessionToken]);
 
   useEffect(() => {
     let cancelled = false;
@@ -635,7 +642,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
     return () => {
       cancelled = true;
     };
-  }, [sessionToken]);
+  }, [debug, sessionToken]);
 
   useEffect(() => {
     if (!cvProcessing || !cvUploadedFileId) return;
@@ -827,6 +834,11 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       setError("Please select your date of birth.");
       return false;
     }
+    const gpa = floatOrNull(undergradGpa);
+    if (gpa !== null && (gpa < 0 || gpa > 4)) {
+      setError("Please enter a GPA between 0.0 and 4.0 (or leave it blank).");
+      return false;
+    }
     // Scores are optional.
     return true;
   };
@@ -885,6 +897,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
             isoDob,
             selections,
             intakeTestScoresPayload,
+            undergradGpa,
           ),
         );
         setMaxStepCompleted((prev) => (prev < 1 ? 1 : prev));
@@ -991,6 +1004,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
               isoDob,
               selections,
               intakeTestScoresPayload,
+              undergradGpa,
             ),
           );
           setMaxStepCompleted(3);
@@ -1054,6 +1068,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
             isoDob,
             selections,
             intakeTestScoresPayload,
+            undergradGpa,
           ),
         );
         setMaxStepCompleted(3);
@@ -1236,6 +1251,26 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                                 </div>
                               </div>
                             ) : null}
+                          </div>
+
+                          <div className="mt-5">
+                            <label htmlFor="intake-undergrad-gpa" className={labelClass}>
+                              Undergraduate GPA (optional)
+                            </label>
+                            <input
+                              id="intake-undergrad-gpa"
+                              name="undergrad_gpa"
+                              type="text"
+                              inputMode="decimal"
+                              value={undergradGpa}
+                              onChange={(e) => setUndergradGpa(e.target.value)}
+                              disabled={busy}
+                              className={fieldShell}
+                              placeholder="e.g. 3.7 (0.0–4.0)"
+                            />
+                            <p className="mt-1 text-xs text-on-surface-variant">
+                              If your GPA is on a different scale, leave this blank for now.
+                            </p>
                           </div>
 
                           <div className="mt-5 space-y-5">

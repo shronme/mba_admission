@@ -281,7 +281,9 @@ def admission_evaluation_job(payload: dict) -> dict:
                         candidate_queue.append(rows.pop(0))
                         still = True
 
-            max_attempts = min(25, len(candidate_queue))
+            # When researching additional recommendations, keep this bounded for latency/cost.
+            MAX_EXTRA_SCHOOLS_TO_RESEARCH = 5
+            max_attempts = min(MAX_EXTRA_SCHOOLS_TO_RESEARCH, len(candidate_queue))
             # Guardrail: don't surface "recommendations" with very low absolute chance,
             # even if they're marginally better than baseline.
             MIN_RECOMMENDED_CHANCE_1_100 = 50

@@ -119,6 +119,8 @@ export type CandidateIntakePayload = {
   date_of_birth: string;
   /** Up to 4 (school, program) selections for intake step 1. */
   school_program_selections: IntakeSchoolProgramSelectionPayload[];
+  /** Optional undergrad GPA (stored in profile.attributes). */
+  undergrad_gpa?: number | null;
   /** Optional standardized tests; stored on the profile. */
   intake_test_scores?: IntakeTestScoresPayload | null;
 };
@@ -509,6 +511,7 @@ export async function patchCandidateIntake(
       country_of_residence: body.country_of_residence.trim(),
       date_of_birth: body.date_of_birth,
       school_program_selections: body.school_program_selections,
+      undergrad_gpa: body.undergrad_gpa ?? null,
       intake_test_scores: body.intake_test_scores ?? null,
     }),
   });
@@ -549,6 +552,7 @@ export async function patchCandidateIntakeDraft(
       country_of_residence: body.country_of_residence.trim(),
       date_of_birth: body.date_of_birth,
       school_program_selections: body.school_program_selections,
+      undergrad_gpa: body.undergrad_gpa ?? null,
       intake_test_scores: body.intake_test_scores ?? null,
     }),
   });

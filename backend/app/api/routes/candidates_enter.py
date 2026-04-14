@@ -71,6 +71,7 @@ def _merge_intake_profile_attributes(attrs: dict[str, Any], body: CandidateIntak
     attrs["school_program_selections"] = [
         s.model_dump(mode="json") for s in body.school_program_selections
     ]
+    attrs["undergrad_gpa"] = body.undergrad_gpa
     if INTAKE_OTHER_SCHOOL_SENTINEL in body.target_schools:
         tso = (body.target_schools_other or "").strip()
         attrs["target_schools_other"] = tso if tso else None
