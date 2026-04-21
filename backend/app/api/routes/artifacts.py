@@ -34,11 +34,15 @@ async def download_artifact(
     cv_repo = CVDraftRepository(session)
     essay_repo = EssayDraftRepository(session)
 
-    record = await cv_repo.get_by_id(artifact_id, candidate_id=candidate_id)
-    artifact_type = "cv_draft"
+    record = await cv_repo.get_by_id_unscoped(artifact_id)
+    if record is not None and getattr(record, "candidate_id", None) != candidate_id:
+        raise HTTPException(status_code=403, detail="Forbidden") from None
+
     if record is None:
-        record = await essay_repo.get_by_id(artifact_id, candidate_id=candidate_id)
-        artifact_type = "essay_draft"
+        record = await essay_repo.get_by_id_unscoped(artifact_id)
+        if record is not None and getattr(record, "candidate_id", None) != candidate_id:
+            raise HTTPException(status_code=403, detail="Forbidden") from None
+
     if record is None:
         raise HTTPException(status_code=404, detail="Artifact not found") from None
 

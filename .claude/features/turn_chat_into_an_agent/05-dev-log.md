@@ -98,3 +98,8 @@ TC-054 (meta: full suite passes with DSPY_MODE=mock).
 ### Notes
 
 - Full backend suite passes with `DSPY_MODE=mock` (see TASK-017). One log-capture assertion is skipped in this environment due to ASGI/caplog capture limitations, but functional behavior is covered and passing.
+
+## Review Fixes (2026-04-21)
+
+- RC-001: Updated `GET /artifacts/{id}/download` ownership semantics to return **403** when the artifact exists but belongs to another candidate (unscoped repo lookup + candidate_id check). Tightened integration test to seed a real artifact and assert strict 403.
+- RC-002: Updated `StreamingChat.tsx` plain-text URL fallback to infer `artifact_type` heuristically and avoid incorrectly labeling unknown artifacts as CV drafts (structured artifact events unchanged).

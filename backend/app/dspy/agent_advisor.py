@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+import json
+import logging
+from collections.abc import Awaitable, Callable
 
 import dspy
+
+logger = logging.getLogger(__name__)
 
 
 class AgentAdvisorSignature(dspy.Signature):
@@ -94,6 +98,31 @@ class AgentAdvisorModule(dspy.Module):
 
 
 class MockAgentAdvisorModule(dspy.Module):
+    """
+    Deterministic stand-in for the real ReAct advisor used when
+    `DSPY_MODE=mock`.
+
+    When constructed with a `save_artifact_fn` (the async tool closure built
+    by `build_agent_tools`), a CV/essay-flavored turn will actually persist a
+    real `cv_drafts` / `essay_drafts` row and surface the real UUID on the
+    returned `dspy.Prediction`. This keeps the end-to-end mock pipeline
+    honest — the emitted `artifact_id` is a valid UUID that the
+    `GET /artifacts/{artifact_id}/download` endpoint (which validates
+    `uuid.UUID`) can resolve.
+
+    If no `save_artifact_fn` is provided, or if persistence fails (e.g. in
+    unit tests that pass a `MagicMock` session), we fall back to the legacy
+    hard-coded placeholder IDs so those tests continue to pass.
+    """
+
+    def __init__(
+        self,
+        save_artifact_fn: Callable[[str, str, str, str | None], Awaitable[str]]
+        | None = None,
+    ) -> None:
+        super().__init__()
+        self._save_artifact_fn = save_artifact_fn
+
     def forward(self, user_message: str, **kwargs) -> dspy.Prediction:  # type: ignore[override]
         msg = (user_message or "").lower()
         if "cv" in msg:
@@ -110,5 +139,58 @@ class MockAgentAdvisorModule(dspy.Module):
             )
         return dspy.Prediction(response="[MOCK] How can I help you?")
 
-    async def aforward(self, **kwargs) -> dspy.Prediction:
-        return self.forward(**kwargs)
+    async def aforward(self, user_message: str = "", **kwargs) -> dspy.Prediction:
+        msg = (user_message or "").lower()
+        if "cv" in msg:
+            artifact_id, download_url = await self._maybe_persist(
+                artifact_type="cv_draft",
+                title="Mock CV Draft",
+                body="[MOCK] Generated CV body.",
+                school_name=None,
+            )
+            return dspy.Prediction(
+                response="[MOCK] Here is your improved CV.",
+                artifact_id=artifact_id or "mock-cv-artifact-id",
+                artifact_type="cv_draft",
+                download_url=download_url or "",
+            )
+        if "essay" in msg:
+            artifact_id, download_url = await self._maybe_persist(
+                artifact_type="essay_draft",
+                title="Mock Essay Draft",
+                body="[MOCK] Generated essay feedback body.",
+                school_name=None,
+            )
+            return dspy.Prediction(
+                response="[MOCK] Here is your essay feedback.",
+                artifact_id=artifact_id or "mock-essay-artifact-id",
+                artifact_type="essay_draft",
+                download_url=download_url or "",
+            )
+        return dspy.Prediction(response="[MOCK] How can I help you?")
+
+    async def _maybe_persist(
+        self,
+        *,
+        artifact_type: str,
+        title: str,
+        body: str,
+        school_name: str | None,
+    ) -> tuple[str | None, str | None]:
+        """
+        Invoke the injected save_artifact tool closure (if any) and parse its
+        JSON return value. Any failure (no closure, mock session, DB error)
+        is swallowed so the mock module still returns a usable Prediction.
+        """
+        if self._save_artifact_fn is None:
+            return None, None
+        try:
+            raw = await self._save_artifact_fn(artifact_type, title, body, school_name)
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and parsed.get("artifact_id"):
+                return parsed.get("artifact_id"), parsed.get("download_url")
+        except Exception:
+            logger.exception(
+                "mock_advisor_save_artifact_failed artifact_type=%s", artifact_type
+            )
+        return None, None

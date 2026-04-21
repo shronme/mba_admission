@@ -47,3 +47,13 @@ class CVDraftRepository(BaseRepository):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_id_unscoped(self, artifact_id: uuid.UUID) -> CVDraft | None:
+        """
+        Fetch by artifact id only (no candidate scope).
+
+        Used to distinguish "not found" (404) from "exists but owned by another
+        candidate" (403) at the API layer.
+        """
+        result = await self.session.execute(select(CVDraft).where(CVDraft.id == artifact_id))
+        return result.scalar_one_or_none()
+

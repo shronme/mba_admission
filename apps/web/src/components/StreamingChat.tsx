@@ -42,9 +42,27 @@ function extractArtifactFromText(text: string): {
   );
   if (!m) return null;
   const id = m[2];
+  const lower = t.toLowerCase();
+  const idx = lower.indexOf(m[0].toLowerCase());
+  const windowStart = Math.max(0, idx - 80);
+  const windowEnd = Math.min(lower.length, idx + 80);
+  const context = lower.slice(windowStart, windowEnd);
+
+  // Heuristic: if we can’t infer type confidently, don’t render a misleading card.
+  const inferredType: "cv_draft" | "essay_draft" | null = (() => {
+    if (/\bessay\b/.test(context) || /\bapplication\b/.test(context) || /\bprompt\b/.test(context)) {
+      return "essay_draft";
+    }
+    if (/\bcv\b/.test(context) || /\bresume\b/.test(context) || /\br[ée]sum[ée]\b/.test(context)) {
+      return "cv_draft";
+    }
+    return null;
+  })();
+
+  if (!inferredType) return null;
   return {
     artifact_id: id,
-    artifact_type: "cv_draft",
+    artifact_type: inferredType,
     title: "",
     school_name: "",
     // Normalize to same-origin API proxy path for the browser.

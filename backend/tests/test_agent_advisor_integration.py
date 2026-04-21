@@ -33,6 +33,7 @@ from app.core.config import settings
 from app.core.db import get_db_session
 from app.main import app
 from app.repositories.candidate_repo import CandidateRepository
+from app.repositories.cv_draft_repository import CVDraftRepository
 
 os.environ["DSPY_MODE"] = "mock"
 
@@ -253,9 +254,21 @@ class TestArtifactDownloadOwnership:
                 data_b = await _enter_candidate(client, f"other-{suffix}@example.com")
                 auth_b = {"Authorization": f"Bearer {data_b['session_token']}"}
 
-                # Use a real artifact UUID that belongs to candidate A if possible.
-                # For now, just use a random UUID and verify 403 or 404.
-                artifact_id = str(uuid.uuid4())
+                candidate_a_id = uuid.UUID(data_a["candidate"]["id"])
+
+                # Seed a real artifact for candidate A so we can assert strict 403
+                # semantics for cross-candidate access.
+                async with sm() as session:
+                    cv_repo = CVDraftRepository(session)
+                    record = await cv_repo.create(
+                        candidate_a_id,
+                        school_name="Wharton",
+                        title="Test CV Draft",
+                        body="Hello",
+                    )
+                    await session.commit()
+                    artifact_id = str(record.id)
+
                 r = await client.get(
                     f"/artifacts/{artifact_id}/download",
                     headers=auth_b,
@@ -263,10 +276,7 @@ class TestArtifactDownloadOwnership:
                 )
                 if r.status_code == 404 and "Not Found" in r.text and "detail" not in r.text.lower():
                     pytest.skip("Artifact download endpoint not yet implemented")
-                # Artifact doesn't exist → 404, or if it did and belonged to A → 403
-                assert r.status_code in (403, 404), (
-                    f"Expected 403 or 404, got {r.status_code}: {r.text}"
-                )
+                assert r.status_code == 403, f"Expected 403, got {r.status_code}: {r.text}"
         finally:
             app.dependency_overrides.pop(get_db_session, None)
             await engine.dispose()

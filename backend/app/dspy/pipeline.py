@@ -238,8 +238,11 @@ async def generate_assistant_response(
 
         retrieve_fn, save_fn = build_agent_tools(session, candidate_id, openai_client)
         dspy_mode = (os.getenv("DSPY_MODE") or "").lower()
+        # Pass `save_fn` into the mock module so CV/essay turns persist a real
+        # artifact row with a real UUID — otherwise the emitted artifact_id
+        # would fail FastAPI's `uuid.UUID` validator on the download route.
         module = (
-            MockAgentAdvisorModule()
+            MockAgentAdvisorModule(save_artifact_fn=save_fn)
             if dspy_mode == "mock"
             else AgentAdvisorModule(retrieve_fn, save_fn)
         )
