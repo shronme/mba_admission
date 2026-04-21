@@ -426,3 +426,12 @@ def process_uploaded_document(file_id: str) -> dict:
         except Exception:
             logger.exception("doc_processing failed_persist file_id=%s", file_id)
         raise
+
+
+def _process_uploaded_document_delay(file_id: str) -> None:
+    from app.core.job_runner import JobType, job_runner
+
+    job_runner.enqueue(JobType.PROCESS_UPLOADED_DOCUMENT, {"file_id": file_id})
+
+
+process_uploaded_document.delay = _process_uploaded_document_delay  # type: ignore[attr-defined]

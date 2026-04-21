@@ -10,7 +10,7 @@ import { CandidateStitchShell } from "@/components/CandidateStitchShell";
 import { SearchableMultiSelect } from "@/components/SearchableMultiSelect";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import type { SearchableOption } from "@/components/SearchableSelect";
-import { FinalQuestionsStep } from "@/components/FinalQuestionsStep";
+import { StreamingChat } from "@/components/StreamingChat";
 import type {
   CandidateDto,
   CandidateIntakePayload,
@@ -19,12 +19,14 @@ import type {
 } from "@/lib/api";
 import type { UploadedFileDto } from "@/lib/api";
 import {
+  createChatThread,
   fetchIntakeTargetSchools,
   fetchCandidateProfile,
   listUploadedFiles,
   patchCandidateIntake,
   patchCandidateIntakeDraft,
   patchCandidateIntakeStep,
+  reviewCandidateProfile,
   uploadFileWithDocumentHint,
 } from "@/lib/api";
 import { COUNTRY_NAMES } from "@/data/countries";
@@ -407,9 +409,9 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const [error, setError] = useState<string | null>(null);
   const [dobOpen, setDobOpen] = useState(false);
   const [finalChatComplete, setFinalChatComplete] = useState(false);
-  const handleFinalChatCompleteChange = useCallback((c: boolean) => {
-    setFinalChatComplete(Boolean(c));
-  }, []);
+  const [finalChatThreadId, setFinalChatThreadId] = useState<string | null>(null);
+  const [finalChatThreadBusy, setFinalChatThreadBusy] = useState(false);
+  const [finalChatThreadError, setFinalChatThreadError] = useState<string | null>(null);
 
   const dobWrapRef = useRef<HTMLDivElement>(null);
   const today = new Date();
@@ -419,6 +421,55 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
   const debug = useCallback((...args: unknown[]) => {
     if (debugEnabled) console.debug("[intake]", ...args);
   }, [debugEnabled]);
+
+  useEffect(() => {
+    if (currentStep !== 4) return;
+    let cancelled = false;
+    const t = window.setInterval(() => {
+      void (async () => {
+        try {
+          const r = await reviewCandidateProfile(sessionToken);
+          if (!cancelled) setFinalChatComplete(Boolean(r.profile_complete));
+        } catch {
+          // Ignore transient poll errors; chat can continue regardless.
+        }
+      })();
+    }, 1500);
+    // Kick once immediately.
+    void (async () => {
+      try {
+        const r = await reviewCandidateProfile(sessionToken);
+        if (!cancelled) setFinalChatComplete(Boolean(r.profile_complete));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [currentStep, sessionToken]);
+
+  useEffect(() => {
+    if (currentStep !== 4) return;
+    if (finalChatThreadId) return;
+    let cancelled = false;
+    setFinalChatThreadError(null);
+    setFinalChatThreadBusy(true);
+    void (async () => {
+      try {
+        const { thread_id } = await createChatThread(sessionToken);
+        if (!cancelled) setFinalChatThreadId(thread_id);
+      } catch (e) {
+        if (!cancelled) setFinalChatThreadError(e instanceof Error ? e.message : String(e));
+      } finally {
+        if (!cancelled) setFinalChatThreadBusy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentStep, finalChatThreadId, sessionToken]);
 
   const scoreCategory = useMemo(
     () => {
@@ -1113,7 +1164,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
       onNavDocuments={() => router.push("/documents")}
       activePhaseIndex={0}
       phaseProgressCurrent={1}
-      phaseProgressTotal={6}
+      phaseProgressTotal={4}
       onSignOut={onSignOut}
       mobileMainTab="intake"
     >
@@ -1251,26 +1302,6 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                                 </div>
                               </div>
                             ) : null}
-                          </div>
-
-                          <div className="mt-5">
-                            <label htmlFor="intake-undergrad-gpa" className={labelClass}>
-                              Undergraduate GPA (optional)
-                            </label>
-                            <input
-                              id="intake-undergrad-gpa"
-                              name="undergrad_gpa"
-                              type="text"
-                              inputMode="decimal"
-                              value={undergradGpa}
-                              onChange={(e) => setUndergradGpa(e.target.value)}
-                              disabled={busy}
-                              className={fieldShell}
-                              placeholder="e.g. 3.7 (0.0–4.0)"
-                            />
-                            <p className="mt-1 text-xs text-on-surface-variant">
-                              If your GPA is on a different scale, leave this blank for now.
-                            </p>
                           </div>
 
                           <div className="mt-5 space-y-5">
@@ -1422,6 +1453,25 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
 
                           {pairs[0]?.programSlug?.trim() ? (
                             <div className="mt-8 border-t border-white/10 pt-6">
+                              <div className="mb-6">
+                                <label htmlFor="intake-undergrad-gpa" className={labelClass}>
+                                  Undergraduate GPA (optional)
+                                </label>
+                                <input
+                                  id="intake-undergrad-gpa"
+                                  name="undergrad_gpa"
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={undergradGpa}
+                                  onChange={(e) => setUndergradGpa(e.target.value)}
+                                  disabled={busy}
+                                  className={fieldShell}
+                                  placeholder="e.g. 3.7 (0.0–4.0)"
+                                />
+                                <p className="mt-1 text-xs text-on-surface-variant">
+                                  If your GPA is on a different scale, leave this blank for now.
+                                </p>
+                              </div>
                               <h3 className="font-serif text-lg text-brand-900">Standardized tests (optional)</h3>
                               {scoreCategory ? (
                                 <p className="mt-1 text-sm text-on-surface-variant">
@@ -1743,7 +1793,7 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                   {currentStep === 2 ? (
                     <>
                       <p className="mb-6 text-on-surface-variant">
-                        Upload your existing transcripts and professional history. The Curator AI will analyze your data
+                        Upload your existing transcripts and professional history. The Advisor AI will analyze your data
                         against Ivy League benchmarks.
                       </p>
                       {!cvFile && cvServerFilename && (cvServerStatus === "ready" || cvServerStatus === "reviewing") ? (
@@ -1967,10 +2017,32 @@ export function CandidateIntakeForm({ sessionToken, initialFullName, onComplete,
                       </p>
 
                       <div className="mt-5 overflow-hidden rounded-xl border border-[#c4c6cd]/20">
-                        <FinalQuestionsStep
-                          sessionToken={sessionToken}
-                          onCompleteChange={handleFinalChatCompleteChange}
-                        />
+                        {finalChatThreadError ? (
+                          <div className="bg-white p-4">
+                            <p className="text-sm font-semibold text-red-800">Couldn’t start chat</p>
+                            <p className="mt-2 text-sm text-on-surface-variant">{finalChatThreadError}</p>
+                            <button
+                              type="button"
+                              className="mt-4 rounded-lg border border-[#c4c6cd]/25 bg-surface-low px-4 py-2 text-xs font-semibold text-brand-900 hover:bg-surface-container"
+                              onClick={() => {
+                                setFinalChatThreadId(null);
+                                setFinalChatThreadError(null);
+                              }}
+                            >
+                              Try again
+                            </button>
+                          </div>
+                        ) : finalChatThreadBusy || !finalChatThreadId ? (
+                          <div className="bg-white p-4 text-sm text-neutral-500">
+                            Starting chat…
+                          </div>
+                        ) : (
+                          <StreamingChat
+                            sessionToken={sessionToken}
+                            threadId={finalChatThreadId}
+                            inputPlaceholder="Type your answer…"
+                          />
+                        )}
                       </div>
 
                       <div className="mt-5 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">

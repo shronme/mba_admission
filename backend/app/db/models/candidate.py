@@ -71,6 +71,11 @@ class Candidate(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         back_populates="candidate",
         cascade="all, delete-orphan",
     )
+    cv_drafts: Mapped[list["CVDraft"]] = relationship(
+        back_populates="candidate",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
     ai_runs: Mapped[list["AiRun"]] = relationship(
         back_populates="candidate",
         cascade="all, delete-orphan",

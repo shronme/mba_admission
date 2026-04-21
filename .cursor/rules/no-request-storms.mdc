@@ -1,0 +1,65 @@
+---
+description: Prevent React effect loops that cause hundreds of API calls per second
+globs: apps/web/**/*.{ts,tsx}
+alwaysApply: false
+---
+
+# No request storms from React effects
+
+Every API call from a React effect must have a finite, predictable rate. If an
+effect can fire faster than the user can blink, it's a bug — even if the
+backend "can handle it". We have repeatedly shipped `useEffect` loops that
+spam endpoints like `GET /candidates/me` hundreds of times per second.
+
+## The three dependency pitfalls
+
+### 1. Never depend on state that the effect itself updates
+
+```tsx
+// BAD: effect updates `candidate` via onCandidateUpdate -> re-fires -> infinite loop
+useEffect(() => {
+  fetchCandidateProfileFresh(sessionToken).then(onCandidateUpdate);
+}, [sessionToken, onCandidateUpdate, candidate]);
+
+// GOOD: put callbacks/values behind refs, depend only on what truly triggers a re-run
+const onCandidateUpdateRef = useRef(onCandidateUpdate);
+useEffect(() => { onCandidateUpdateRef.current = onCandidateUpdate; }, [onCandidateUpdate]);
+
+useEffect(() => {
+  fetchCandidateProfileFresh(sessionToken).then(onCandidateUpdateRef.current);
+}, [sessionToken]);
+```
+
+### 2. Never depend on objects built during render
+
+`parseJob(attrs.x)`, inline `{...}`, and `.filter(...)` results are **new**
+every render. An effect that depends on them will clear/recreate its interval
+on every render, making a `1800ms` `setInterval` fire far more often.
+
+```tsx
+// BAD
+const job = parseJob(attrs.job);                 // new object every render
+useEffect(() => { const t = setInterval(..., 1800); return () => clearInterval(t); }, [job]);
+
+// GOOD — depend on a stable primitive
+const runningJobId = job?.ai_run_id ?? null;
+useEffect(() => { const t = setInterval(..., 1800); return () => clearInterval(t); }, [runningJobId]);
+```
+
+### 3. Callbacks passed as props are not stable
+
+Assume every `onSomething` prop is a new function identity each render unless
+the parent wraps it in `useCallback` with stable deps. Put it in a ref or
+leave it out of the deps (with an eslint-disable comment explaining why).
+
+## Review checklist before committing any effect that calls the network
+
+- [ ] Does anything this effect does update a value in its own deps array?
+- [ ] Are all object/array deps memoized, or replaced with primitive keys (id, status)?
+- [ ] If it uses `setInterval`/`setTimeout`, can deps changing reset the timer mid-flight?
+- [ ] For polling endpoints, is there a hard minimum interval (≥ 1s) and a stop condition?
+- [ ] Before merging: open DevTools → Network, watch for 10s, count calls to the endpoint. Anything > ~1/sec for a polling endpoint is a bug.
+
+Client-side caching in `apps/web/src/lib/api.ts` is a safety net, not a fix.
+If you find yourself tightening its throttle to stop a storm, the storm's
+real cause is almost always a broken effect — fix it there instead.

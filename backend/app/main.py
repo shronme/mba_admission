@@ -13,6 +13,7 @@ from starlette.staticfiles import StaticFiles
 from app.api.routes.admin import router as admin_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.admission_evaluation import router as admission_evaluation_router
+from app.api.routes.artifacts import router as artifacts_router
 from app.api.routes.candidates_enter import router as candidates_enter_router
 from app.api.routes.chat import router as chat_router
 from app.api.routes.files import router as files_router
@@ -20,6 +21,7 @@ from app.api.routes.health import router as health_router
 from app.api.routes.jobs import router as jobs_router
 from app.api.routes.wiring_smoke import router as wiring_smoke_router
 from app.core.config import settings
+from app.core.dspy_runtime import configure_dspy_from_env
 from app.core.job_runner import attach_job_runner
 from app.core.logging import configure_logging, reset_log_context, set_log_context
 from app.core.phoenix import configure_phoenix_tracing
@@ -31,6 +33,8 @@ def create_app() -> FastAPI:
     configure_logging()
     # Initialize Phoenix tracing before any LLM/DSPy clients are constructed.
     configure_phoenix_tracing()
+    # Ensure DSPy is configured before any request hits DSPy modules.
+    configure_dspy_from_env()
     app = FastAPI(title="AI Admissions API", version="0.1.0")
 
     @app.middleware("http")
@@ -119,6 +123,7 @@ def create_app() -> FastAPI:
     app.include_router(candidates_enter_router)
     app.include_router(admission_evaluation_router)
     app.include_router(chat_router)
+    app.include_router(artifacts_router)
     app.include_router(files_router)
     app.include_router(jobs_router)
     app.include_router(wiring_smoke_router)

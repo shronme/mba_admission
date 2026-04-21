@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.sql import cast, func
 from sqlalchemy.orm import selectinload
 
 from app.db.enums import ChatThreadStatus, MessageRole
@@ -66,6 +68,26 @@ class ChatRepository(BaseRepository):
         )
         return list(result.scalars().all())
 
+    async def get_latest_active_thread_by_stage(
+        self,
+        candidate_id: uuid.UUID,
+        *,
+        stage: str,
+    ) -> ChatThread | None:
+        """
+        Most recent active thread where `thread.extra.stage` matches.
+
+        Note: extra is JSONB so filtering is done in Python to keep this repo
+        SQLAlchemy-only and avoid JSON dialect differences for now.
+        """
+        threads = await self.list_threads_for_candidate(candidate_id)
+        for t in threads:
+            if t.status != ChatThreadStatus.ACTIVE:
+                continue
+            if isinstance(t.extra, dict) and str(t.extra.get("stage") or "") == stage:
+                return t
+        return None
+
     async def get_thread_with_messages(self, thread_id: uuid.UUID) -> ChatThread | None:
         result = await self.session.execute(
             select(ChatThread)
@@ -73,3 +95,20 @@ class ChatRepository(BaseRepository):
             .where(ChatThread.id == thread_id),
         )
         return result.scalar_one_or_none()
+
+    async def patch_message_extra(self, message_id: uuid.UUID, extra_patch: dict) -> None:
+        """
+        JSONB merge-patch of ChatMessage.extra (preserves existing keys).
+        """
+        if not extra_patch:
+            return
+        await self.session.execute(
+            update(ChatMessage)
+            .where(ChatMessage.id == message_id)
+            .values(
+                extra=func.coalesce(ChatMessage.extra, cast({}, JSONB)).op("||")(
+                    cast(extra_patch, JSONB)
+                )
+            )
+        )
+        await self.session.flush()

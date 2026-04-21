@@ -182,6 +182,13 @@ export type AdmissionEvaluationResultDto = {
   error?: string | null;
 };
 
+/** Persisted under `profile.attributes.selected_schools` and used by advisor threads. */
+export type SelectedSchoolRow = {
+  school: string;
+  program_slug: string;
+  program_display_name?: string;
+};
+
 // Client-side request coalescing to prevent "request storms" when multiple
 // components poll the same GET endpoints concurrently (or React dev mode remounts).
 const _inflight = new Map<string, Promise<unknown>>();
@@ -633,6 +640,117 @@ export async function reviewCandidateProfile(sessionToken: string): Promise<Prof
       };
     },
   );
+}
+
+/** POST /chat/threads — create or reuse the latest active intake thread. */
+export async function createChatThread(sessionToken: string): Promise<{ thread_id: string }> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/chat/threads`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /chat/threads: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    throw new Error(
+      `POST /chat/threads failed: ${res.status} ${typeof data === "object" && data !== null ? JSON.stringify(data) : text}`,
+    );
+  }
+  const obj = data as Record<string, unknown>;
+  const threadId = typeof obj.thread_id === "string" ? obj.thread_id : null;
+  if (!threadId) throw new Error("POST /chat/threads: missing thread_id");
+  return { thread_id: threadId };
+}
+
+export async function confirmSchoolSelection(
+  sessionToken: string,
+  selectedSchools: SelectedSchoolRow[],
+): Promise<{ selected_schools: SelectedSchoolRow[]; stage: string }> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const res = await fetch(`${root}/candidates/me/school-selection/confirm`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${sessionToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      selected_schools: selectedSchools.map((s) => ({
+        school: s.school,
+        program_slug: s.program_slug,
+      })),
+    }),
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(
+      `POST /candidates/me/school-selection/confirm: invalid JSON (${res.status})`,
+    );
+  }
+  if (!res.ok) {
+    const hint =
+      res.status === 409 ? " (finish your admission evaluation first)" : "";
+    throw new Error(
+      `Confirm school selection failed: ${res.status}${hint} ${
+        typeof data === "object" && data !== null ? JSON.stringify(data) : text
+      }`,
+    );
+  }
+  const obj = data as Record<string, unknown>;
+  return {
+    selected_schools: Array.isArray(obj.selected_schools)
+      ? (obj.selected_schools as SelectedSchoolRow[])
+      : [],
+    stage: typeof obj.stage === "string" ? obj.stage : "strategy",
+  };
+}
+
+export async function createAdvisorThread(
+  sessionToken: string,
+  opts?: { new?: boolean },
+): Promise<{ thread_id: string; is_new: boolean }> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const q = opts?.new ? "?new=true" : "";
+  const res = await fetch(`${root}/chat/advisor-threads${q}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${sessionToken}` },
+  });
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`POST /chat/advisor-threads: invalid JSON (${res.status})`);
+  }
+  if (!res.ok) {
+    const hint =
+      res.status === 409 ? " (confirm at least one school first)" : "";
+    throw new Error(
+      `Create advisor thread failed: ${res.status}${hint} ${
+        typeof data === "object" && data !== null ? JSON.stringify(data) : text
+      }`,
+    );
+  }
+  const obj = data as Record<string, unknown>;
+  const threadId = typeof obj.thread_id === "string" ? obj.thread_id : null;
+  if (!threadId) throw new Error("POST /chat/advisor-threads: missing thread_id");
+  return {
+    thread_id: threadId,
+    is_new: obj.is_new === true,
+  };
 }
 
 export async function submitCandidateProfileAnswers(

@@ -28,6 +28,7 @@ from app.constants.graduate_programs_catalog import (
 )
 from app.constants.target_us_schools import INTAKE_TARGET_SCHOOLS_MAX_SELECTIONS
 from app.repositories.candidate_repo import CandidateRepository
+from app.repositories.strategy_decision_repo import StrategyDecisionRepository
 from app.repositories.user_repo import UserRepository
 from app.schemas.candidates import (
     CandidateEnterRequest,
@@ -36,6 +37,10 @@ from app.schemas.candidates import (
     CandidateIntakeStepUpdate,
     CandidateOut,
     CandidateProfileOut,
+)
+from app.schemas.school_selection import (
+    SchoolSelectionConfirmRequest,
+    SchoolSelectionConfirmResponse,
 )
 
 import uuid
@@ -219,6 +224,90 @@ async def get_me(
     if candidate is None:
         raise HTTPException(status_code=404, detail="Candidate not found")
     return _candidate_to_out(candidate)
+
+
+@router.post("/me/school-selection/confirm", response_model=SchoolSelectionConfirmResponse)
+async def confirm_school_selection(
+    body: SchoolSelectionConfirmRequest,
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> SchoolSelectionConfirmResponse:
+    """
+    Persist confirmed school list to profile.attributes, upsert StrategyDecision,
+    and advance candidate stage to STRATEGY.
+    """
+
+    if not body.selected_schools:
+        raise HTTPException(status_code=400, detail="selected_schools must include at least one item.")
+
+    # Load profile attributes to enforce evaluation gating.
+    from sqlalchemy import select
+
+    prof = (
+        await session.execute(
+            select(CandidateProfile).where(CandidateProfile.candidate_id == candidate_id),
+        )
+    ).scalar_one_or_none()
+    attrs = dict(prof.attributes or {}) if prof else {}
+    result = attrs.get("admission_evaluation_result")
+    if not isinstance(result, dict) or result.get("status") != "complete":
+        raise HTTPException(
+            status_code=409,
+            detail="Admission evaluation must be complete before confirming schools.",
+        )
+
+    # Enrich selected payload with program_display_name from evaluation results when available.
+    program_display: dict[tuple[str, str], str] = {}
+    primary = result.get("primary")
+    if isinstance(primary, list):
+        for row in primary:
+            if not isinstance(row, dict):
+                continue
+            school = row.get("school")
+            slug = row.get("program_slug")
+            disp = row.get("program_display_name")
+            if isinstance(school, str) and isinstance(slug, str) and isinstance(disp, str):
+                program_display[(school, slug)] = disp
+    extra = result.get("extra")
+    if isinstance(extra, list):
+        for row in extra:
+            if not isinstance(row, dict):
+                continue
+            school = row.get("school")
+            slug = row.get("program_slug")
+            disp = row.get("program_display_name")
+            if isinstance(school, str) and isinstance(slug, str) and isinstance(disp, str):
+                program_display[(school, slug)] = disp
+
+    selected_payload = []
+    for s in body.selected_schools:
+        d = s.model_dump(mode="json")
+        key = (s.school, s.program_slug)
+        if not d.get("program_display_name") and key in program_display:
+            d["program_display_name"] = program_display[key]
+        selected_payload.append(d)
+
+    crepo = CandidateRepository(session)
+    await crepo.merge_profile_attributes(
+        candidate_id,
+        {"selected_schools": selected_payload},
+        overwrite=True,
+    )
+
+    # Upsert semantic strategy decision row.
+    srepo = StrategyDecisionRepository(session)
+    await srepo.upsert_school_selection(candidate_id, payload={"selected_schools": selected_payload})
+
+    # Advance stage.
+    cand = await crepo.get_by_id(candidate_id)
+    if cand is None:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+    from app.db.enums import CandidateStage
+
+    cand.stage = CandidateStage.STRATEGY
+    await session.commit()
+
+    return SchoolSelectionConfirmResponse(selected_schools=body.selected_schools, stage="strategy")
 
 
 @router.patch("/me/intake", response_model=CandidateOut)

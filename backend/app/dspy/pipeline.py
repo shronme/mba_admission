@@ -4,7 +4,11 @@ import json
 import os
 from typing import Any
 
+import dspy
+import logging
+
 from app.core.dspy_runtime import run_dspy_module
+from app.core.dspy_runtime import configure_dspy_from_env
 from app.db.enums import ProgramType
 from app.dspy.answer_relevance_classifier import (
     MockAnswerRelevanceClassifier,
@@ -25,6 +29,7 @@ from app.dspy.research_agent import MockResearchAgent, OpenAIResearchAgent
 
 _DISALLOWED_FULL_ESSAY_PHRASES = (
     "write my personal statement",
+    "write my essay",
     "write the essay",
     "write an essay",
     "draft a full essay",
@@ -36,6 +41,8 @@ _OFF_TOPIC_KEYWORDS = ("calculus", "photosynthesis", "quantum", "chemistry")
 # Attributes that are populated by CV/document extraction. Their presence signals
 # that at least one document has been fully processed — used for phase detection.
 _DOC_DERIVED_ATTRS = frozenset({"domain_base", "core_identity", "core_strengths", "transferable_assets"})
+
+logger = logging.getLogger(__name__)
 
 _DEGREE_TOKENS = {
     "ms": "MS",
@@ -153,7 +160,7 @@ def _last_assistant_message(recent_messages: list[dict[str, Any]]) -> str:
     return ""
 
 
-def generate_assistant_response(
+async def generate_assistant_response(
     *,
     user_message: str,
     file_count: int,
@@ -162,7 +169,14 @@ def generate_assistant_response(
     recent_messages: list[dict[str, Any]],
     profile_complete: bool = False,
     current_completeness_score: int = 0,
-) -> tuple[str, dict[str, Any], bool, int]:
+    thread_stage: str | None = None,
+    selected_schools: list[dict[str, Any]] | None = None,
+    admission_evaluation_result: dict[str, Any] | None = None,
+    session: Any | None = None,
+    candidate_id: Any | None = None,
+    openai_client: Any | None = None,
+    available_documents: list[dict[str, Any]] | None = None,
+) -> Any:
     """
     DSPy pipeline: route based on profile completeness, then generate a response.
 
@@ -178,12 +192,18 @@ def generate_assistant_response(
 
     from app.core.dspy_runtime import openai_calls_enabled
 
+    # The advisor stage uses `await module.aforward(...)` directly (not `run_dspy_module`),
+    # so ensure DSPy has an LM configured before any DSPy Predict is invoked.
+    configure_dspy_from_env()
+
     use_openai = openai_calls_enabled()
 
     user_lower = (user_message or "").lower()
 
     # --- Guardrails ---
-    if any(phrase in user_lower for phrase in _DISALLOWED_FULL_ESSAY_PHRASES):
+    if (thread_stage or "").lower() != "advisor" and any(
+        phrase in user_lower for phrase in _DISALLOWED_FULL_ESSAY_PHRASES
+    ):
         return (
             "I can help you brainstorm, outline, and improve your draft, but I can't write a full essay for you. "
             "Paste the prompt and share a few bullet points from your own story, and I'll help shape a strong outline.",
@@ -205,6 +225,66 @@ def generate_assistant_response(
     candidate_attributes: dict[str, Any] = (
         (candidate_profile.get("attributes") or {}) if candidate_profile else {}
     )
+
+    # --- Route to advisor agent when thread is advisor stage ---
+    if (thread_stage or "").lower() == "advisor":
+        from app.dspy.agent_advisor import AgentAdvisorModule, MockAgentAdvisorModule
+        from app.dspy.agent_tools import build_agent_tools
+
+        if session is None or candidate_id is None or openai_client is None:
+            raise ValueError(
+                "advisor stage requires session, candidate_id, and openai_client"
+            )
+
+        retrieve_fn, save_fn = build_agent_tools(session, candidate_id, openai_client)
+        dspy_mode = (os.getenv("DSPY_MODE") or "").lower()
+        module = (
+            MockAgentAdvisorModule()
+            if dspy_mode == "mock"
+            else AgentAdvisorModule(retrieve_fn, save_fn)
+        )
+
+        # Format conversation history as ASSISTANT/USER lines (newest last).
+        lines = []
+        for m in recent_messages:
+            role = (m.get("role") or "").lower()
+            label = "ASSISTANT" if role == "assistant" else "USER"
+            content = (m.get("content") or "").strip()
+            if content:
+                lines.append(f"{label}: {content}")
+        history = "\n".join(lines)
+
+        # Pre-format doc snippets so the agent can usually answer without any
+        # retrieval tool call (the snippets were already fetched via pgvector
+        # in the chat route using `user_message` as the query).
+        if docs_snippets:
+            preloaded_snippets_text = "\n\n".join(
+                f"[{i + 1}] {snippet}" for i, snippet in enumerate(docs_snippets)
+            )
+        else:
+            preloaded_snippets_text = "No snippets pre-loaded."
+
+        pred: dspy.Prediction = await module.aforward(
+            profile_attributes_json=json.dumps(candidate_attributes, ensure_ascii=False),
+            selected_schools_json=json.dumps(selected_schools or [], ensure_ascii=False),
+            available_documents_json=json.dumps(
+                available_documents or [], ensure_ascii=False
+            ),
+            preloaded_document_snippets=preloaded_snippets_text,
+            conversation_history=history,
+            user_message=user_message,
+        )
+        traj = getattr(pred, "trajectory", None)
+        try:
+            traj_len = len(traj) if traj is not None else 0
+        except Exception:
+            traj_len = 0
+        logger.info(
+            "advisor_react_complete candidate_id=%s trajectory_len=%s",
+            str(candidate_id),
+            traj_len,
+        )
+        return pred
 
     # --- Route to ResearchAgent when the profile is already complete ---
     if profile_complete:

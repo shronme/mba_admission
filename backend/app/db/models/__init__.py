@@ -8,6 +8,7 @@ from app.db.models.audit import AuditEvent
 from app.db.models.candidate import Candidate, CandidateProfile
 from app.db.models.chat import ChatMessage, ChatThread
 from app.db.models.candidate_sessions import CandidateSession  # kept for migration tracking
+from app.db.models.cv_draft import CVDraft
 from app.db.models.document_chunk import DocumentChunk
 from app.db.models.knowledge_chunk import KnowledgeChunk
 from app.db.models.essay import EssayDraft, EssayReview
@@ -26,6 +27,7 @@ __all__ = [
     "CandidateSession",
     "ChatMessage",
     "ChatThread",
+    "CVDraft",
     "DocumentChunk",
     "KnowledgeChunk",
     "EssayDraft",

@@ -1,7 +1,7 @@
 # Design System Specification: The Academic Editorial
 
 ## 1. Overview & Creative North Star
-**Creative North Star: "The Digital Curator"**
+**Creative North Star: "The Digital Advisor"**
 This design system moves away from the "template" look of standard SaaS platforms, instead drawing inspiration from high-end editorial journals and the architectural permanence of Ivy League institutions. It is designed to feel like a bespoke consultancy experience—authoritative, quiet, and deeply intentional.
 
 To achieve this, we reject rigid, boxed-in grids in favor of **Intentional Asymmetry**. By utilizing generous whitespace (negative space) as a functional element rather than a void, we guide the user’s eye through a curated narrative. Elements should feel like they are "resting" on a surface rather than being "trapped" in a container. Overlapping elements and high-contrast typography scales are the primary tools for establishing a sophisticated visual hierarchy.

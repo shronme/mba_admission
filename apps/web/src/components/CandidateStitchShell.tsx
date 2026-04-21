@@ -6,9 +6,7 @@ export const CANDIDATE_APPLICATION_PHASES = [
   "01. Intake",
   "02. Evaluation",
   "03. Positioning",
-  "04. Application",
-  "05. Validation",
-  "06. Submission",
+  "04. Advisor",
 ] as const;
 
 export type CandidateStitchNavTab = "dashboard" | "documents";
@@ -19,7 +17,7 @@ type Props = {
   activeNav: CandidateStitchNavTab;
   onNavDashboard: () => void;
   onNavDocuments: () => void;
-  /** Index into `CANDIDATE_APPLICATION_PHASES` (0–5). */
+  /** Index into `CANDIDATE_APPLICATION_PHASES` (0–3). */
   activePhaseIndex: number;
   phaseProgressCurrent: number;
   phaseProgressTotal: number;
@@ -169,7 +167,7 @@ export function CandidateStitchShell({
 
       <aside className="fixed left-0 top-0 hidden h-screen w-64 flex-col border-r border-[#c4c6cd]/15 bg-surface-low py-8 pt-28 md:flex">
         <div className="mb-10 px-6">
-          <h2 className="font-serif text-lg text-brand-900">The Curator</h2>
+          <h2 className="font-serif text-lg text-brand-900">The Advisor</h2>
           <p className="font-sans text-xs font-medium uppercase tracking-widest text-brand-500">Premium Admissions AI</p>
         </div>
         <div className="mb-4 px-6">

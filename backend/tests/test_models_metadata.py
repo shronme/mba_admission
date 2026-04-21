@@ -9,6 +9,7 @@ def test_all_task002_tables_registered() -> None:
         "candidate_profiles",
         "chat_threads",
         "chat_messages",
+        "cv_drafts",
         "uploaded_files",
         "strategy_decisions",
         "task_items",

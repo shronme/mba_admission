@@ -23,6 +23,13 @@ export type AppSession = {
 
 type SessionContextValue = {
   session: AppSession | null;
+  /**
+   * True once we've attempted to read the persisted session from localStorage.
+   * Until this flips to true, consumers cannot tell the difference between
+   * "user is signed out" and "we just haven't rehydrated yet", so route guards
+   * must NOT redirect based on `session == null` while `hydrated === false`.
+   */
+  hydrated: boolean;
   setSession: (value: AppSession | null) => void;
   signIn: (email: string) => Promise<AuthEnterResponse>;
   signOut: () => void;
@@ -47,9 +54,11 @@ function readStoredSession(): AppSession | null {
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [session, setSessionState] = useState<AppSession | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     setSessionState(readStoredSession());
+    setHydrated(true);
   }, []);
 
   const setSession = useCallback((value: AppSession | null) => {
@@ -82,8 +91,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   }, [setSession]);
 
   const value = useMemo(
-    () => ({ session, setSession, signIn, signOut }),
-    [session, setSession, signIn, signOut],
+    () => ({ session, hydrated, setSession, signIn, signOut }),
+    [session, hydrated, setSession, signIn, signOut],
   );
 
   return (

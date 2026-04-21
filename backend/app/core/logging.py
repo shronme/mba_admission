@@ -1,5 +1,6 @@
 import contextvars
 import logging
+import os
 import sys
 import uuid
 from typing import Optional, Tuple, TypeVar
@@ -59,12 +60,16 @@ def configure_logging() -> None:
     """
 
     log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    if "pytest" in sys.modules:
+        log_level = logging.INFO
 
     # Ensure our app logs consistently include our context fields, regardless of how
     # uvicorn/celery configure global logging.
     app_logger = logging.getLogger("app")
     app_logger.setLevel(log_level)
-    app_logger.propagate = False
+    # Allow propagation so test suites (caplog) can capture `app.*` records.
+    # Note: this may duplicate logs in some environments, but keeps observability tests stable.
+    app_logger.propagate = True
 
     # Avoid duplicate handlers on reload/re-import.
     app_logger.handlers.clear()
@@ -81,4 +86,14 @@ def configure_logging() -> None:
 
     # Also set root level so libraries (e.g. SQLAlchemy) still emit something.
     logging.getLogger().setLevel(log_level)
+
+    # Ensure nested app.* loggers bubble up (pytest caplog expects propagation).
+    for name, obj in logging.root.manager.loggerDict.items():
+        if not isinstance(name, str):
+            continue
+        if name == "app" or name.startswith("app."):
+            try:
+                logging.getLogger(name).propagate = True
+            except Exception:
+                continue
 

@@ -11,6 +11,7 @@ import {
   fetchCandidateProfileFresh,
   startAdmissionEvaluation,
 } from "@/lib/api";
+import { SchoolSelectionConfirm } from "@/components/SchoolSelectionConfirm";
 
 type Props = {
   sessionToken: string;
@@ -88,6 +89,19 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
     }
   }, [refresh, sessionToken]);
 
+  // Stabilize callbacks via refs so `boot` and the poll effect don't retrigger
+  // whenever the parent passes a new `onCandidateUpdate` identity or when the
+  // candidate object is replaced (which happens inside these very effects).
+  const onCandidateUpdateRef = useRef(onCandidateUpdate);
+  useEffect(() => {
+    onCandidateUpdateRef.current = onCandidateUpdate;
+  }, [onCandidateUpdate]);
+
+  const candidateRef = useRef(candidate);
+  useEffect(() => {
+    candidateRef.current = candidate;
+  }, [candidate]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -97,10 +111,10 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
       try {
         fresh = await fetchCandidateProfileFresh(sessionToken);
       } catch {
-        fresh = candidate;
+        fresh = candidateRef.current;
       }
       if (cancelled) return;
-      onCandidateUpdate(fresh);
+      onCandidateUpdateRef.current(fresh);
       const a = readAttrs(fresh);
       const res = parseResult(a.admission_evaluation_result);
       if (res?.status === "complete") {
@@ -123,12 +137,16 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
       startOnce.current = true;
       try {
         await startAdmissionEvaluation(sessionToken);
-        if (!cancelled) await refresh();
+        if (!cancelled) {
+          const c = await fetchCandidateProfileFresh(sessionToken);
+          if (!cancelled) onCandidateUpdateRef.current(c);
+        }
       } catch (e) {
         if (!cancelled) {
           const msg = e instanceof Error ? e.message : String(e);
           if (msg.includes("already completed")) {
-            await refresh();
+            const c = await fetchCandidateProfileFresh(sessionToken);
+            if (!cancelled) onCandidateUpdateRef.current(c);
           } else {
             setError(msg);
           }
@@ -142,16 +160,26 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
     return () => {
       cancelled = true;
     };
-  }, [sessionToken, onCandidateUpdate, refresh]);
+    // IMPORTANT: only re-run when the session token actually changes. Including
+    // `candidate` / `onCandidateUpdate` / `refresh` here causes an infinite loop
+    // because this effect updates `candidate` via `onCandidateUpdate`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionToken]);
+
+  // Derive a stable primitive for the polling effect so it doesn't reset on
+  // every render (which would effectively turn the 1800ms interval into a
+  // tight loop).
+  const runningJobId = job?.ai_run_id ?? null;
 
   useEffect(() => {
-    if (!job || booting) return;
+    if (!runningJobId || booting) return;
     let cancelled = false;
     const t = window.setInterval(() => {
       void (async () => {
         try {
           const c = await fetchCandidateProfileFresh(sessionToken);
-          if (!cancelled) onCandidateUpdate(c);
+          if (cancelled) return;
+          onCandidateUpdateRef.current(c);
           const r = parseResult(readAttrs(c).admission_evaluation_result);
           if (r?.status === "complete" || r?.status === "failed") {
             window.clearInterval(t);
@@ -168,7 +196,7 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
       cancelled = true;
       window.clearInterval(t);
     };
-  }, [job, booting, sessionToken, onCandidateUpdate]);
+  }, [runningJobId, booting, sessionToken]);
 
   if (booting) {
     return (
@@ -209,7 +237,7 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
             className="group/btn mt-6 flex items-center justify-center gap-3 rounded-lg bg-accent px-8 py-4 text-sm font-bold text-brand-900 shadow-xl shadow-accent/20 transition-transform hover:scale-[1.02] sm:w-auto"
             onClick={() => void retryStart()}
           >
-            Retry
+            Retry evaluation
           </button>
         </div>
       </>
@@ -217,7 +245,13 @@ export function AdmissionEvaluationPanel({ sessionToken, candidate, onCandidateU
   }
 
   if (result?.status === "complete") {
-    return <EvaluationResultsView result={result} />;
+    return (
+      <EvaluationResultsView
+        result={result}
+        sessionToken={sessionToken}
+        candidate={candidate}
+      />
+    );
   }
 
   if (error) {
@@ -737,10 +771,14 @@ function AdmissionChanceDonut({
 
 function EvaluationResultsView({
   result,
+  sessionToken,
+  candidate,
   headerVariant = "candidate",
   hideFooter = false,
 }: {
   result: AdmissionEvaluationResultDto;
+  sessionToken?: string;
+  candidate?: CandidateDto;
   headerVariant?: "candidate" | "admin";
   hideFooter?: boolean;
 }) {
@@ -826,22 +864,28 @@ function EvaluationResultsView({
       ) : null}
 
       {!hideFooter ? (
-        <footer className="mt-16 flex flex-col gap-3 border-t border-[#c4c6cd]/20 pt-10 sm:flex-row sm:items-center sm:justify-between">
-          <button
-            type="button"
-            disabled
-            className="rounded-lg border border-[#c4c6cd]/25 bg-surface-low px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-on-surface-variant opacity-60"
-          >
-            Export full report
-          </button>
-          <button
-            type="button"
-            disabled
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-900 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-white opacity-50"
-          >
-            Proceed to positioning
-            <span aria-hidden>→</span>
-          </button>
+        <footer className="mt-16 border-t border-[#c4c6cd]/20 pt-10">
+          {sessionToken && candidate ? (
+            <SchoolSelectionConfirm sessionToken={sessionToken} candidate={candidate} result={result} />
+          ) : (
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                disabled
+                className="rounded-lg border border-[#c4c6cd]/25 bg-surface-low px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-on-surface-variant opacity-60"
+              >
+                Export full report
+              </button>
+              <button
+                type="button"
+                disabled
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-900 px-5 py-2.5 text-xs font-semibold uppercase tracking-wider text-white opacity-50"
+              >
+                Proceed to positioning
+                <span aria-hidden>→</span>
+              </button>
+            </div>
+          )}
         </footer>
       ) : null}
     </>

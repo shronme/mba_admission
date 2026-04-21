@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import Enum as SQLEnum, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, Enum as SQLEnum, ForeignKey, Index, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,7 +13,13 @@ from app.db.mixins import TimestampMixin, UUIDPrimaryKeyMixin
 
 class EssayDraft(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "essay_drafts"
-    __table_args__ = (Index("ix_essay_drafts_candidate_id", "candidate_id"),)
+    __table_args__ = (
+        Index("ix_essay_drafts_candidate_id", "candidate_id"),
+        CheckConstraint(
+            "source IN ('agent', 'human')",
+            name="ck_essay_drafts_source",
+        ),
+    )
 
     candidate_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -29,6 +35,13 @@ class EssayDraft(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         nullable=False,
         default=EssayStatus.DRAFT,
         insert_default=EssayStatus.DRAFT,
+    )
+    source: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="human",
+        insert_default="human",
+        server_default=text("'human'"),
     )
     extra: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
