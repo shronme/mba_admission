@@ -32,7 +32,6 @@ If `04-tasks.md` doesn't exist or its Status is not `COMPLETE`, stop and print a
    - Add inline comments where logic is non-obvious
    - Do not over-engineer; follow the spec exactly
 5. Update the dev log after each task.
-6. After each task, pause and print your progress update — do not implement multiple tasks in one go unless explicitly asked.
 
 ## Dev Log Format
 

@@ -24,6 +24,8 @@ from app.db.models.candidate import Candidate, CandidateProfile
 from app.db.models.files import UploadedFile
 from app.repositories.candidate_repo import CandidateRepository
 from app.repositories.chat_repo import ChatRepository
+from app.repositories.uploaded_file_repository import UploadedFileRepository
+from app.dspy.intent import classify_rewrite_intent
 from app.dspy.pipeline import generate_assistant_response, generate_initial_greeting
 from app.dspy.school_advisor import generate_opening_advisor_message
 from app.dspy.profile_language_normalize import run_profile_attributes_english_normalize
@@ -44,9 +46,40 @@ async def _retrieve_doc_snippets(
     """
     Return relevant document snippets for the given user message.
 
-    Uses pgvector semantic search when OPENAI_API_KEY is available; falls back
-    to naive full-text injection (up to 3 documents' extracted_text) otherwise.
+    On clear rewrite/redraft intent (FR-1) the semantic top-k path is
+    **replaced** by tagged full-document blocks for the latest CV and life
+    story. Otherwise the existing pgvector semantic search runs, with the
+    legacy naive full-text injection as a fallback when no OPENAI_API_KEY is
+    set.
     """
+    # --- Rewrite-intent branch (FR-1 + FR-4): full-doc replaces semantic ---
+    if classify_rewrite_intent(user_message):
+        upload_repo = UploadedFileRepository(session)
+        cv_doc = await upload_repo.get_latest_full_text_by_document_type(
+            candidate_id, "cv"
+        )
+        life_doc = await upload_repo.get_latest_full_text_by_document_type(
+            candidate_id, "life_story"
+        )
+        blocks: list[str] = []
+        if cv_doc is not None:
+            blocks.append(
+                f"[CV — full text]\n{cv_doc.text}\n[End CV]"
+            )
+        if life_doc is not None:
+            blocks.append(
+                f"[Life story — full text]\n{life_doc.text}\n[End Life story]"
+            )
+        logger.info(
+            "chat_rewrite_intent_preload candidate_id=%s cv=%s life_story=%s",
+            candidate_id,
+            cv_doc is not None,
+            life_doc is not None,
+        )
+        # v1 replace semantics: no semantic fallback for matched-intent turns
+        # even when neither document exists (returns empty list).
+        return blocks
+
     api_key = os.getenv("OPENAI_API_KEY")
     if api_key:
         try:

@@ -1,0 +1,29 @@
+JORDAN KIM
+jordan.kim@example.com | (555) 072-5533 | New York, NY
+
+SUMMARY
+Product-focused engineering leader who has grown from individual contributor to
+engineering manager across six years at the same company.
+
+EXPERIENCE
+
+Northwind Analytics
+Sep 2019 – Present
+
+Engineering Manager, Growth — Northwind Analytics
+Apr 2023 – Present
+- Leads a team of 7 engineers owning onboarding, activation, and self-serve billing.
+- Drove activation rate from 38% to 51% through onboarding experiments.
+
+Staff Software Engineer — Northwind Analytics
+Oct 2021 – Mar 2023
+- Architected the event-stream ingestion layer processing 2B events/day.
+- Owned the incident-response rota and postmortem program.
+
+Software Engineer — Northwind Analytics
+Sep 2019 – Sep 2021
+- Shipped the initial self-serve billing product; first $1M of ARR.
+
+EDUCATION
+
+B.S. Electrical Engineering and Computer Science — MIT, 2019

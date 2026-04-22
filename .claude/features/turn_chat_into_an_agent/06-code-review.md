@@ -4,54 +4,53 @@
 APPROVED
 
 ## Review Round
-Round 2
+Round 3
 
 ## Summary
-Previously requested fixes are implemented and verified against `02-product-spec.md` and `04-tasks.md`. The artifact download route distinguishes **404** (no row) from **403** (row exists, wrong candidate) via `get_by_id_unscoped` on both repositories, and integration tests assert strict **403**. The plain-text URL fallback in `StreamingChat.tsx` no longer defaults essay-adjacent URLs to `cv_draft`; it infers type from local context or omits the card when inference is ambiguous. Remaining items below are optional follow-ups, not merge blockers.
+The round-2 fix for **TC-022** and **TC-023** correctly addresses the failure mode in `07-test-report.md`: under `DSPY_MODE=mock`, the advisor pipeline passes the real `save_artifact` closure into `MockAgentAdvisorModule`, which calls it from `aforward` so a row is persisted and the stream emits a **UUID-shaped** `artifact_id` that satisfies FastAPI's `uuid.UUID` validator on `GET /artifacts/{artifact_id}/download`. Exception handling in `_maybe_persist` is scoped to the mock helper and is **not** used by the production `AgentAdvisorModule` path. No Alembic migration files were added in this round.
 
 ## Required Changes (must fix before approval)
 
-*None — Round 1 items RC-001 and RC-002 are resolved.*
-
-### Verification — RC-001 (403 for cross-candidate access, FR-9)
-- **File**: `backend/app/api/routes/artifacts.py`
-- **Verification**: The handler loads `CVDraft` / `EssayDraft` by id without candidate scope, then returns **403** when `record.candidate_id != candidate_id`, and **404** only when no row exists in either table.
-- **Tests**: `TestArtifactDownloadOwnership.test_cross_candidate_access_returns_403` in `backend/tests/test_agent_advisor_integration.py` seeds a real `CVDraft` for candidate A and asserts **403** when candidate B requests the download.
-
-### Verification — RC-002 (fallback URL parsing does not mislabel artifact type)
-- **File**: `apps/web/src/components/StreamingChat.tsx`
-- **Verification**: `extractArtifactFromText` uses a context window around the matched URL and sets `essay_draft` vs `cv_draft` from keywords; if neither heuristic matches, it returns **`null`** so no download card is shown with a wrong type.
+*None.*
 
 ## Suggested Improvements (optional, not blocking)
 
-### SI-001: Align `download_url` with FR-7 wording
-- **File**: `backend/app/dspy/agent_tools.py`, `backend/app/api/routes/chat.py`
-- **Suggestion**: Spec **FR-7** describes `/artifacts/{id}/download`; the app may emit `/api/artifacts/...` for the Next.js proxy. Standardize naming in the spec or developer docs only — behavior is consistent.
+### SI-001: Reconcile **FR-12** wording with mock persistence
+- **File**: `02-product-spec.md` (**FR-12**)
+- **Suggestion**: The spec says the mock returns deterministic output **without** calling any "database function." The new behavior intentionally invokes `save_artifact_fn` (DB via repositories) so integration tests and downloads stay aligned with real rows. Consider updating **FR-12** to allow this persistence hook while still forbidding LLM/embeddings, or state that "no DB" applies when `save_artifact_fn` is omitted (unit tests).
 
-### SI-002: Reduce duplicate download controls in the card
-- **File**: `apps/web/src/components/ArtifactDownloadCard.tsx`
-- **Suggestion**: The card exposes both small “Word / PDF” text links and primary “Download as Word/PDF” buttons. **FR-10** only requires the two buttons; removing the redundant row would simplify layout and focus.
+### SI-002: `forward` vs `aforward` on `MockAgentAdvisorModule` when `save_artifact_fn` is set
+- **File**: `backend/app/dspy/agent_advisor.py`
+- **Suggestion**: With an injected `save_artifact_fn`, only `aforward` persists; `forward` still returns placeholder IDs. The live pipeline uses `aforward` only. Optional docstring note if future callers might use `forward` with injection.
 
-### SI-003: NDJSON buffer flush on stream end
-- **File**: `apps/web/src/components/StreamingChat.tsx`
-- **Suggestion**: After the `while` loop finishes, parse any remaining `buf` as a final line so a missing trailing newline cannot drop the last event (defensive; backend currently emits `\n`-terminated lines).
+### SI-003: `max_iters` vs product spec
+- **File**: `backend/app/dspy/agent_advisor.py`, `02-product-spec.md` / `03-qa-plan.md`
+- **Suggestion**: Code uses `max_iters=4`; spec/QA still say **8**. Pre-existing drift, not introduced by this round.
 
-### SI-004: Repository / migration test coverage (per dev log)
-- **File**: `backend/tests/` (deferred cases in `05-dev-log.md`)
-- **Suggestion**: Dev log lists TC-032, TC-033, TC-037, etc. as deferred. Not blocking this review, but dedicated tests for `CVDraftRepository` versioning and essay `source` would match **TASK-004** / **TASK-017** intent.
+### SI-004–SI-006
+- Carry forward prior review items (download URL path wording vs FR-7, deferred repository tests, caplog assertion) as optional follow-ups.
 
-### SI-005: Strict INFO log assertion in tests
-- **File**: `backend/tests/` (per `05-dev-log.md` “skipped” caplog assertion)
-- **Suggestion**: **TASK-012** asked for caplog verification; restoring or replacing the skipped assertion would lock in observability.
+## Focus Areas (this round)
+
+### Mock fallback / exception swallowing vs production
+- **`_maybe_persist`** catches `Exception`, logs with `logger.exception`, and falls back to legacy placeholder IDs.
+- **Production**: `MockAgentAdvisorModule` is only selected when `dspy_mode == "mock"` in `pipeline.py`. Real traffic using `AgentAdvisorModule` does not use this swallow path.
+- **Failure modes**: If mock mode is on but `save_artifact` fails, logs include a full traceback; the stream may still carry a non-UUID `artifact_id` and downloads return **422** — observable, not silent corruption.
+
+### Dependency injection
+- **Approved:** Same `build_agent_tools` → `save_fn` as for `AgentAdvisorModule`; injecting `MockAgentAdvisorModule(save_artifact_fn=save_fn)` matches the existing closure pattern in `pipeline.py`.
+
+### Migrations
+- **Confirmed:** This round's code changes are only `agent_advisor.py`, `pipeline.py`, and the dev log — no new Alembic revision.
 
 ## Checklist
 - [x] Correctness
-- [x] Completeness (core tasks; some QA TCs deferred per dev log)
+- [x] Completeness (TC-022/023 intent)
 - [x] Code quality
-- [x] Edge case handling (403 vs 404; fallback type inference or omit)
-- [x] Security (ownership on download)
-- [x] Tests present (integration covers 403; suite per dev log)
-- [x] No obvious regressions (intake/research streaming unchanged)
+- [x] Edge case handling
+- [x] Security (unchanged)
+- [x] Tests (per dev log verification)
+- [x] No obvious regressions
 
 ## Output Artifacts
 - `01-ba-analysis.md` ✅
@@ -60,4 +59,3 @@ Previously requested fixes are implemented and verified against `02-product-spec
 - `04-tasks.md` ✅
 - `05-dev-log.md` ✅
 - `06-code-review.md` ✅
-

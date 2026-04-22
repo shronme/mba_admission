@@ -20,6 +20,8 @@ import os
 import uuid
 import zipfile
 
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
 from app.core.sync_db import sync_session_scope
 from app.db.enums import DocumentType, FileStatus
 from app.db.models.files import UploadedFile
@@ -243,8 +245,22 @@ def _extract_text(
     if not extracted or not extracted.strip():
         return None, None
 
-    cleaned = extracted.strip()[:20_000]
-    chunks = [c.strip() for c in cleaned.split("\n\n") if c.strip()][:25]
+    # Forward-only: cap the stored `extracted_text` at 200k characters per
+    # FR-5. Existing rows are not backfilled; only new/reprocessed uploads
+    # pick up the new cap. Older storage was 20k, which truncated long life
+    # stories well before their conclusions.
+    cleaned = extracted.strip()[:200_000]
+
+    # Token-aware chunking aligned with `text-embedding-3-small`
+    # (cl100k_base): 600 tokens/chunk, 50 overlap. The chunk list is hard-
+    # capped at 200 as a safety ceiling (FR-5).
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+        encoding_name="cl100k_base",
+        chunk_size=600,
+        chunk_overlap=50,
+    )
+    raw_chunks = splitter.split_text(cleaned)
+    chunks = [c.strip() for c in raw_chunks if c and c.strip()][:200]
     return cleaned, chunks
 
 

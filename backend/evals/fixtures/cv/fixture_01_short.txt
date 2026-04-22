@@ -1,0 +1,23 @@
+ALEX MORGAN
+alex.morgan@example.com | (555) 010-2412 | San Jose, CA
+
+SUMMARY
+Software engineer with 4 years of experience in backend systems and payment
+infrastructure. Strong record of shipping high-reliability services.
+
+EXPERIENCE
+
+Senior Software Engineer — Nimbus Payments
+Jun 2022 – Present
+- Led rebuild of merchant payout service handling $180M in monthly volume.
+- Reduced end-to-end payout latency from 9s to 1.4s via queue partitioning.
+- Mentored two engineers through promotion from Eng I to Eng II.
+
+Software Engineer — Harbor Labs
+Aug 2020 – May 2022
+- Owned the ingestion service for bank-statement OCR, >99.9% uptime.
+- Introduced contract testing; cut cross-service incidents by 40%.
+
+EDUCATION
+
+B.S. Computer Science — University of California, San Diego, 2020

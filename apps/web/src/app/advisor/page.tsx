@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { CandidateStitchShell, candidateInitials } from "@/components/CandidateStitchShell";
@@ -25,7 +25,7 @@ function readSelectedSchools(candidate: CandidateDto): Array<{ school: string; p
   return out.length ? out : null;
 }
 
-export default function AdvisorPage() {
+function AdvisorPageInner() {
   const router = useRouter();
   const search = useSearchParams();
   const { session, hydrated, setSession, signOut } = useSession();
@@ -259,6 +259,20 @@ export default function AdvisorPage() {
         </div>
       </div>
     </CandidateStitchShell>
+  );
+}
+
+export default function AdvisorPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-surface-low text-sm text-neutral-600">
+          Loading your advisor conversation…
+        </div>
+      }
+    >
+      <AdvisorPageInner />
+    </Suspense>
   );
 }
 

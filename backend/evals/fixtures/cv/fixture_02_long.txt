@@ -1,0 +1,37 @@
+PRIYA RAMASWAMY
+priya.ramaswamy@example.com | +1 (555) 030-8712 | Boston, MA
+
+SUMMARY
+Product and operations leader with 7 years of cross-functional experience across
+consumer fintech, healthtech, and public sector consulting. Builder of teams
+and systems that scale from pilot to nationwide rollout.
+
+EXPERIENCE
+
+Director of Product Operations — Beacon Health Systems
+Jan 2023 – Present
+- Scaled telehealth platform from 40k to 320k monthly visits across 11 states.
+- Launched clinician scheduling redesign; reduced no-show rate from 18% to 11%.
+- Directs a team of 9 PMs and ops analysts; owns $4.2M annual budget.
+
+Senior Product Manager — Clearwater Capital (Fintech)
+Mar 2021 – Dec 2022
+- Shipped commercial onboarding flow; cut time-to-first-transaction from 11 days to 4.
+- Partnered with compliance to launch KYC refresh pipeline across three markets.
+
+Product Manager — Clearwater Capital (Fintech)
+Aug 2019 – Feb 2021
+- Ran the credit-limit recommendation experiment platform for SMB card product.
+
+Consultant — Monitor Sigma
+Jul 2017 – Jun 2019
+- Served public-sector clients on workforce-digitization programs in three states.
+
+EDUCATION
+
+M.P.P. — Harvard Kennedy School, 2023
+B.A. Economics and Computer Science — Williams College, 2017
+
+AWARDS
+- Rhodes Finalist, 2017
+- Monitor Sigma President's Award, 2018

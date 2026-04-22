@@ -742,7 +742,18 @@ class TestArtifactDownloadGeneration:
     @pytest.mark.asyncio
     async def test_pdf_download_returns_pdf_bytes(self, tmp_path: Path) -> None:
         """TC-023: pdf format response starts with %PDF."""
-        pytest.importorskip("weasyprint", reason="weasyprint not installed")
+        # WeasyPrint's cffi bindings dlopen native deps (gobject/pango/cairo) at
+        # import time, so both ImportError and OSError are expected on hosts
+        # without the native libs (e.g. macOS dev machines).
+        # `pytest.importorskip` only handles ImportError, so we skip manually.
+        try:
+            from weasyprint import HTML as _WPHTML
+
+            _WPHTML(string="<p>probe</p>").write_pdf()
+        except ImportError as exc:
+            pytest.skip(f"weasyprint not installed: {exc}")
+        except OSError as exc:
+            pytest.skip(f"WeasyPrint native libraries unavailable on host: {exc}")
         storage_module._BACKEND = None
         os.environ["LOCAL_STORAGE_DIR"] = str(tmp_path / "bucket")
         engine, sm = _make_engine_and_sessionmaker()

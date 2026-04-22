@@ -18,12 +18,32 @@ class AgentAdvisorSignature(dspy.Signature):
       (work history, test scores, target programs, career goals, etc.).
     - `selected_schools_json`: the schools/programs the candidate is applying to.
     - `available_documents_json`: the list of documents the candidate has ALREADY
-      uploaded. Every document listed here is indexed and retrievable through the
-      `retrieve_candidate_context` tool.
+      uploaded. Every document listed here is indexed and retrievable.
     - `preloaded_document_snippets`: passages from the candidate's documents that
       were already retrieved for you using their latest message as the query. In
       most cases this is all the document context you need — read these before
-      calling any tool.
+      calling any tool. On rewrite/redraft turns this block is the
+      **full** CV (and life story if present), wrapped in tagged blocks like
+      `[CV — full text] ... [End CV]`.
+
+    TOOLS
+    - `retrieve_candidate_context(query)`: returns ranked snippets across all of
+      the candidate's uploaded documents. Good for Q&A ("what did they say about
+      leadership"). NOT sufficient for rewrites — it may omit sections, formatting,
+      or tail content.
+    - `get_full_document(document_type)`: returns the **full** extracted text of
+      the latest uploaded document of the given type. Valid types: `cv`,
+      `life_story`, `recommendation_letter`, `grade_sheet`. Use this when you
+      need complete content (e.g. rewriting a CV, grounding an essay in the life
+      story) and the preload does not already contain a tagged full-text block.
+    - `rewrite_cv(target_school="", emphasis="")`: produce a rewritten CV and
+      persist it as a `cv_draft` automatically. Use this when the candidate
+      asks you to rewrite / polish / redraft their CV. You do not need to call
+      `save_artifact` after it — it persists the draft internally and returns
+      the rewritten text.
+    - `save_artifact(artifact_type, title, body, school_name)`: persist a
+      deliverable (essay draft, CV draft you built yourself, etc.) so the
+      candidate can download it. Do NOT call it for advice or outlines.
 
     RULES
     1. NEVER ask the candidate to paste or re-send content that appears in
@@ -31,20 +51,25 @@ class AgentAdvisorSignature(dspy.Signature):
        CV.
     2. Start by reading `preloaded_document_snippets`. If it already contains what
        you need, answer directly WITHOUT calling any tool.
-    3. Only call `retrieve_candidate_context` when `preloaded_document_snippets`
+    3. For rewrite / redraft of a **specific uploaded document** (CV, life story,
+       essay), prefer full text — either the tagged full block already in
+       `preloaded_document_snippets`, or a `get_full_document` call. Do NOT rely
+       on `retrieve_candidate_context` alone for those tasks; ranked snippets can
+       omit roles, dates, or education entries.
+    4. Only call `retrieve_candidate_context` when `preloaded_document_snippets`
        is insufficient AND you can articulate what specific additional content
        you need. Call it AT MOST ONCE per turn, using a single broad query that
        covers everything you need in one shot. Do NOT re-query with refined
        wording — you will get similar results and waste time.
-    4. Only ask the candidate for information that is genuinely not in their
+    5. Only ask the candidate for information that is genuinely not in their
        profile, selected schools, or documents (e.g. a new essay prompt, a target
        word count, which of their listed schools to prioritize this iteration).
-    5. If the candidate has more than one selected school and hasn't specified
+    6. If the candidate has more than one selected school and hasn't specified
        which to tailor this iteration for, it IS reasonable to ask — that is not
        in any document.
-    6. When you produce a concrete artifact (rewritten CV, essay draft), persist
+    7. When you produce a concrete artifact other than via `rewrite_cv`, persist
        it with `save_artifact` and reference the returned download link in your
-       response.
+       response. `rewrite_cv` already persists internally — do not double-save.
 
     Keep responses concise and focused on the next concrete step.
     """
@@ -79,15 +104,28 @@ class AgentAdvisorSignature(dspy.Signature):
 
 
 class AgentAdvisorModule(dspy.Module):
-    def __init__(self, retrieve_fn: Callable, save_artifact_fn: Callable) -> None:
+    def __init__(
+        self,
+        retrieve_fn: Callable,
+        save_artifact_fn: Callable,
+        get_full_document_fn: Callable,
+        rewrite_cv_fn: Callable,
+    ) -> None:
         super().__init__()
-        # max_iters=4: enough for (optional retrieve) + (optional save_artifact) +
-        # final response, with one safety slot. Higher values let the LLM spin on
-        # redundant retrieval calls and blow the client's stream timeout.
+        # max_iters=6: allows the full rewrite trajectory (e.g. read preload ->
+        # `get_full_document` for a second doc -> `rewrite_cv` -> final response)
+        # without timing out. Previous value 4 was tuned to (retrieve +
+        # save_artifact + response) and is too tight once `rewrite_cv` can
+        # appear in the same turn.
         self.react = dspy.ReAct(
             AgentAdvisorSignature,
-            tools=[retrieve_fn, save_artifact_fn],
-            max_iters=4,
+            tools=[
+                retrieve_fn,
+                save_artifact_fn,
+                get_full_document_fn,
+                rewrite_cv_fn,
+            ],
+            max_iters=6,
         )
 
     def forward(self, **kwargs) -> dspy.Prediction:  # type: ignore[override]
@@ -102,26 +140,48 @@ class MockAgentAdvisorModule(dspy.Module):
     Deterministic stand-in for the real ReAct advisor used when
     `DSPY_MODE=mock`.
 
-    When constructed with a `save_artifact_fn` (the async tool closure built
-    by `build_agent_tools`), a CV/essay-flavored turn will actually persist a
+    Per FR-6 the mock MUST mirror the four-tool surface of
+    `AgentAdvisorModule` — `retrieve_candidate_context`, `save_artifact`,
+    `get_full_document`, and `rewrite_cv` — so tests can assert the mock
+    holds the full tool contract even though the trajectory is simulated
+    rather than executed via `dspy.ReAct`.
+
+    When constructed with a `save_fn` (the async tool closure built by
+    `build_agent_tools`), a CV/essay-flavored turn will actually persist a
     real `cv_drafts` / `essay_drafts` row and surface the real UUID on the
     returned `dspy.Prediction`. This keeps the end-to-end mock pipeline
     honest — the emitted `artifact_id` is a valid UUID that the
     `GET /artifacts/{artifact_id}/download` endpoint (which validates
     `uuid.UUID`) can resolve.
 
-    If no `save_artifact_fn` is provided, or if persistence fails (e.g. in
-    unit tests that pass a `MagicMock` session), we fall back to the legacy
-    hard-coded placeholder IDs so those tests continue to pass.
+    If `save_fn` is omitted or persistence fails (e.g. unit tests that pass
+    a `MagicMock` session), we fall back to hard-coded placeholder IDs so
+    those tests continue to pass.
     """
 
     def __init__(
         self,
-        save_artifact_fn: Callable[[str, str, str, str | None], Awaitable[str]]
+        retrieve_fn: Callable[..., Awaitable[str]] | None = None,
+        save_fn: Callable[[str, str, str, str | None], Awaitable[str]]
         | None = None,
+        get_full_document_fn: Callable[..., Awaitable[str]] | None = None,
+        rewrite_cv_fn: Callable[..., Awaitable[str]] | None = None,
     ) -> None:
         super().__init__()
-        self._save_artifact_fn = save_artifact_fn
+        self._retrieve_fn = retrieve_fn
+        self._save_artifact_fn = save_fn
+        self._get_full_document_fn = get_full_document_fn
+        self._rewrite_cv_fn = rewrite_cv_fn
+        # Expose the full four-tool surface for introspection parity with
+        # `AgentAdvisorModule.react.tools` (FR-6 / TC-040). Entries may be
+        # None when the mock is constructed bare (e.g. legacy unit tests);
+        # order matches `build_agent_tools` return tuple.
+        self.tools = [
+            retrieve_fn,
+            save_fn,
+            get_full_document_fn,
+            rewrite_cv_fn,
+        ]
 
     def forward(self, user_message: str, **kwargs) -> dspy.Prediction:  # type: ignore[override]
         msg = (user_message or "").lower()

@@ -1,0 +1,59 @@
+{
+  "fixture_01_short.txt": {
+    "candidate_name": "Alex Morgan",
+    "roles": [
+      {"title": "Senior Software Engineer", "company": "Nimbus Payments", "start": "Jun 2022", "end": "Present"},
+      {"title": "Software Engineer", "company": "Harbor Labs", "start": "Aug 2020", "end": "May 2022"}
+    ],
+    "education": [
+      {"institution": "University of California, San Diego", "degree": "B.S. Computer Science", "year": "2020"}
+    ]
+  },
+  "fixture_02_long.txt": {
+    "candidate_name": "Priya Ramaswamy",
+    "roles": [
+      {"title": "Director of Product Operations", "company": "Beacon Health Systems", "start": "Jan 2023", "end": "Present"},
+      {"title": "Senior Product Manager", "company": "Clearwater Capital", "start": "Mar 2021", "end": "Dec 2022"},
+      {"title": "Product Manager", "company": "Clearwater Capital", "start": "Aug 2019", "end": "Feb 2021"},
+      {"title": "Consultant", "company": "Monitor Sigma", "start": "Jul 2017", "end": "Jun 2019"}
+    ],
+    "education": [
+      {"institution": "Harvard Kennedy School", "degree": "M.P.P.", "year": "2023"},
+      {"institution": "Williams College", "degree": "B.A. Economics and Computer Science", "year": "2017"}
+    ]
+  },
+  "fixture_03_gap.txt": {
+    "candidate_name": "Sam Holland",
+    "roles": [
+      {"title": "Operations Manager", "company": "Greenline Logistics", "start": "Feb 2024", "end": "Present"},
+      {"title": "Senior Operations Analyst", "company": "Bellwether Manufacturing", "start": "Jun 2018", "end": "Aug 2021"},
+      {"title": "Operations Analyst", "company": "Bellwether Manufacturing", "start": "Jul 2016", "end": "May 2018"}
+    ],
+    "education": [
+      {"institution": "Purdue University", "degree": "B.S. Industrial Engineering", "year": "2016"}
+    ]
+  },
+  "fixture_04_multi_role.txt": {
+    "candidate_name": "Jordan Kim",
+    "roles": [
+      {"title": "Engineering Manager, Growth", "company": "Northwind Analytics", "start": "Apr 2023", "end": "Present"},
+      {"title": "Staff Software Engineer", "company": "Northwind Analytics", "start": "Oct 2021", "end": "Mar 2023"},
+      {"title": "Software Engineer", "company": "Northwind Analytics", "start": "Sep 2019", "end": "Sep 2021"}
+    ],
+    "education": [
+      {"institution": "MIT", "degree": "B.S. Electrical Engineering and Computer Science", "year": "2019"}
+    ]
+  },
+  "fixture_05_non_english.txt": {
+    "candidate_name": "Wojciech Kowalski",
+    "roles": [
+      {"title": "Regional Strategy Manager", "company": "Nordica Consumer Brands", "start": "Mar 2022", "end": "Present"},
+      {"title": "Senior Analyst, Strategy", "company": "Nordica Consumer Brands", "start": "Jul 2019", "end": "Feb 2022"},
+      {"title": "Analyst, Commercial Excellence", "company": "Gdansk Maritime Holdings", "start": "Aug 2017", "end": "Jun 2019"}
+    ],
+    "education": [
+      {"institution": "Szkoła Główna Handlowa w Warszawie", "degree": "M.Sc. Management", "year": "2017"},
+      {"institution": "Uniwersytet Warszawski", "degree": "B.Sc. Economics", "year": "2015"}
+    ]
+  }
+}

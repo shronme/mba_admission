@@ -52,10 +52,21 @@ class TestMockAgentAdvisorModule:
 
         If the real module exists use it; otherwise fall back to the spec
         reference implementation so the unit tests themselves are valid.
+
+        Per FR-6 the mock now mirrors the four-tool contract of
+        `AgentAdvisorModule`; construct it with four dummy async callables
+        so the `self.tools` list is populated for introspection-style
+        assertions without changing the observable forward/aforward
+        behavior exercised by this test class.
         """
         try:
             from app.dspy.agent_advisor import MockAgentAdvisorModule
-            return MockAgentAdvisorModule()
+            return MockAgentAdvisorModule(
+                retrieve_fn=_async_dummy_fn,
+                save_fn=_async_dummy_fn,
+                get_full_document_fn=_async_dummy_fn,
+                rewrite_cv_fn=_async_dummy_fn,
+            )
         except ImportError:
             pass
 
@@ -204,14 +215,14 @@ class TestAgentAdvisorModuleInstantiation:
         module = AgentAdvisorModule(
             retrieve_fn=_dummy_fn,
             save_artifact_fn=_dummy_fn,
+            get_full_document_fn=_dummy_fn,
+            rewrite_cv_fn=_dummy_fn,
         )
         assert hasattr(module, "react"), "module.react must exist"
         assert isinstance(module.react, dspy.ReAct), "module.react must be dspy.ReAct"
-        # max_iters is intentionally capped low (4): enough for (optional retrieve)
-        # + (optional save_artifact) + final response + one safety slot. Higher
-        # values let the LLM spin on redundant tool calls and blow the stream
-        # timeout — see the incident where 5 retrievals pushed past 30s.
-        assert getattr(module.react, "max_iters", None) == 4, "max_iters must be 4"
+        # max_iters=6: bumped from 4 to allow full rewrite trajectories
+        # (get_full_document + rewrite_cv + final response) to complete.
+        assert getattr(module.react, "max_iters", None) == 6, "max_iters must be 6"
         assert hasattr(module, "forward"), "module must expose forward"
         assert hasattr(module, "aforward"), "module must expose aforward"
 
@@ -235,6 +246,8 @@ class TestAgentAdvisorModuleForward:
         module = AgentAdvisorModule(
             retrieve_fn=_dummy_fn,
             save_artifact_fn=_dummy_fn,
+            get_full_document_fn=_dummy_fn,
+            rewrite_cv_fn=_dummy_fn,
         )
         module.react = mock_react
 
@@ -269,6 +282,8 @@ class TestAgentAdvisorModuleAforward:
         module = AgentAdvisorModule(
             retrieve_fn=_dummy_fn,
             save_artifact_fn=_dummy_fn,
+            get_full_document_fn=_dummy_fn,
+            rewrite_cv_fn=_dummy_fn,
         )
         # Replace only the aforward method
         module.react = MagicMock()
@@ -315,7 +330,9 @@ class TestRetrieveCandidateContext:
         mock_search = AsyncMock(return_value=chunks)
 
         with patch("app.dspy.agent_tools.search_async", mock_search):
-            retrieve_fn, _save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+            retrieve_fn, _save_fn, _get_full, _rewrite_cv = build_agent_tools(
+                mock_session, candidate_id, mock_openai
+            )
             result = await retrieve_fn("my query")
 
         assert result == "[1] chunk one\n\n[2] chunk two\n\n[3] chunk three"
@@ -338,7 +355,7 @@ class TestRetrieveCandidateContext:
 
         mock_search = AsyncMock(return_value=[])
         with patch("app.dspy.agent_tools.search_async", mock_search):
-            retrieve_fn, _ = build_agent_tools(mock_session, candidate_id, mock_openai)
+            retrieve_fn, *_ = build_agent_tools(mock_session, candidate_id, mock_openai)
             result = await retrieve_fn("empty query")
 
         # Should be empty or placeholder — not raise
@@ -364,8 +381,8 @@ class TestRetrieveCandidateContext:
         mock_openai.embeddings.create = AsyncMock(return_value=fake_embed_resp)
 
         with patch("app.dspy.agent_tools.search_async", mock_search):
-            retrieve_a, _ = build_agent_tools(MagicMock(), id_a, mock_openai)
-            retrieve_b, _ = build_agent_tools(MagicMock(), id_b, mock_openai)
+            retrieve_a, *_ = build_agent_tools(MagicMock(), id_a, mock_openai)
+            retrieve_b, *_ = build_agent_tools(MagicMock(), id_b, mock_openai)
             await retrieve_a("query")
             await retrieve_b("query")
 
@@ -393,7 +410,9 @@ class TestSaveArtifactTool:
             candidate_id = uuid.uuid4()
         mock_session = MagicMock()
         mock_openai = MagicMock()
-        _, save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+        _retrieve_fn, save_fn, _get_full_fn, _rewrite_cv_fn = build_agent_tools(
+            mock_session, candidate_id, mock_openai
+        )
         return save_fn, mock_session, candidate_id
 
     @pytest.mark.asyncio
@@ -413,7 +432,9 @@ class TestSaveArtifactTool:
         mock_openai = MagicMock()
 
         with patch("app.dspy.agent_tools.CVDraftRepository", return_value=mock_repo):
-            _, save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
+            mock_session, candidate_id, mock_openai
+        )
             result = await save_fn("cv_draft", "Wharton CV", "<body>", "Wharton")
 
         parsed = json.loads(result)
@@ -438,7 +459,9 @@ class TestSaveArtifactTool:
         mock_openai = MagicMock()
 
         with patch("app.dspy.agent_tools.EssayDraftRepository", return_value=mock_repo):
-            _, save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
+            mock_session, candidate_id, mock_openai
+        )
             result = await save_fn("essay_draft", "Booth Essay", "<feedback>", "Booth")
 
         parsed = json.loads(result)
@@ -459,7 +482,9 @@ class TestSaveArtifactTool:
         candidate_id = uuid.uuid4()
         mock_session = MagicMock()
         mock_openai = MagicMock()
-        _, save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+        _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
+            mock_session, candidate_id, mock_openai
+        )
 
         for bad_type in ["malicious_type", "", "CV_DRAFT", "'; DROP TABLE--"]:
             result = await save_fn(bad_type, "Title", "Body", "School")
@@ -487,7 +512,9 @@ class TestSaveArtifactTool:
         candidate_id = uuid.uuid4()
 
         with patch("app.dspy.agent_tools.CVDraftRepository", return_value=mock_repo):
-            _, save_fn = build_agent_tools(mock_session, candidate_id, mock_openai)
+            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
+            mock_session, candidate_id, mock_openai
+        )
             result = await save_fn("cv_draft", "My CV", "<body>", "MIT")
 
         parsed = json.loads(result)
