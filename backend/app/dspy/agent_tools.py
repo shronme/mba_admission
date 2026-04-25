@@ -18,6 +18,7 @@ from app.db.models.knowledge_chunk import KnowledgeChunk
 from app.repositories.cv_draft_repository import CVDraftRepository
 from app.repositories.essay_draft_repository import EssayDraftRepository
 from app.repositories.uploaded_file_repository import UploadedFileRepository
+from app.schemas.agent_advisor_intent import parse_intent_json, qa_fallback_intent_json
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,30 @@ def build_agent_tools(
     Callable[[str, str, str, str | None], Awaitable[str]],
     Callable[[str], Awaitable[str]],
     Callable[..., Awaitable[str]],
+    Callable[..., Awaitable[str]],
 ]:
+    # Per-request mutable trajectory state.
+    rewrite_cv_ran = False
+
+    def _safe_preview(text: str, *, head: int = 160, tail: int = 160) -> tuple[str, str]:
+        """
+        Return a safe head/tail preview for debugging without logging full docs.
+        Collapses whitespace so logs stay readable.
+        """
+        s = (text or "").strip()
+        if not s:
+            return "", ""
+        s_norm = " ".join(s.split())
+        return s_norm[:head], (s_norm[-tail:] if len(s_norm) > tail else s_norm)
+
+    def _last_n_messages_for_intent(
+        conversation_history: str | list[dict[str, Any]] | None,
+        n: int = 10,
+    ) -> str:
+        from app.dspy.intent_classifier import last_n_messages_text
+
+        return last_n_messages_text(conversation_history, n=n)
+
     async def retrieve_candidate_context(query: str) -> str:
         """
         Retrieve relevant passages from the candidate's uploaded documents
@@ -129,6 +153,17 @@ def build_agent_tools(
                     "uploaded for this candidate."
                 )
 
+            head, tail = _safe_preview(doc.text)
+            logger.info(
+                "agent_tool full_document_ready candidate_id=%s document_type=%s filename=%s extracted_chars=%s head=%r tail=%r",
+                str(candidate_id),
+                doc.document_type,
+                doc.filename,
+                len(doc.text or ""),
+                head,
+                tail,
+            )
+
             return (
                 f"[{doc.document_type} — full text: {doc.filename}]\n"
                 f"{doc.text}\n"
@@ -175,6 +210,16 @@ def build_agent_tools(
                 return json.dumps({"error": "invalid artifact_type"})
 
             if artifact_type == "cv_draft":
+                if not rewrite_cv_ran:
+                    return json.dumps(
+                        {
+                            "error": (
+                                "Cannot save cv_draft without running rewrite_cv first. "
+                                "Call rewrite_cv to generate the draft, then retry save_artifact "
+                                "using the rewrite_cv output as the body."
+                            )
+                        }
+                    )
                 repo = CVDraftRepository(session)
                 record = await repo.create(
                     candidate_id,
@@ -274,7 +319,11 @@ def build_agent_tools(
             )
             return ""
 
-    async def rewrite_cv(target_school: str = "", emphasis: str = "") -> str:
+    async def rewrite_cv(
+        target_school: str = "",
+        emphasis: str = "",
+        prior_feedback: str = "",
+    ) -> str:
         """
         Rewrite the candidate's latest CV, optionally tailored to a target
         school and/or a thematic emphasis. The full rewrite is persisted as
@@ -295,6 +344,7 @@ def build_agent_tools(
         """
         start = time.perf_counter()
         status = "ok"
+        nonlocal rewrite_cv_ran
         try:
             repo = UploadedFileRepository(session)
             cv_doc = await repo.get_latest_full_text_by_document_type(
@@ -316,6 +366,23 @@ def build_agent_tools(
             profile_json = json.dumps(profile_attrs, ensure_ascii=False)
 
             dossier_text = await _load_school_dossier_text(target_school)
+
+            cv_head, cv_tail = _safe_preview(cv_doc.text)
+            life_head, life_tail = _safe_preview(life_text)
+            logger.info(
+                "agent_tool rewrite_cv_inputs candidate_id=%s cv_filename=%s cv_chars=%s life_filename=%s life_chars=%s profile_json_chars=%s dossier_chars=%s cv_head=%r cv_tail=%r life_head=%r life_tail=%r",
+                str(candidate_id),
+                cv_doc.filename,
+                len(cv_doc.text or ""),
+                (life_doc.filename if life_doc is not None else ""),
+                len(life_text or ""),
+                len(profile_json or ""),
+                len(dossier_text or ""),
+                cv_head,
+                cv_tail,
+                life_head,
+                life_tail,
+            )
 
             # Local import keeps DSPy module construction out of module-import
             # time (mirrors the pattern used elsewhere in this file).
@@ -339,6 +406,7 @@ def build_agent_tools(
                 school_dossier=dossier_text,
                 target_school=target_school or "",
                 emphasis=emphasis or "",
+                prior_feedback=prior_feedback or "",
             )
             rewritten = str(getattr(pred, "rewritten_cv", "") or "").strip()
             if not rewritten:
@@ -347,12 +415,26 @@ def build_agent_tools(
                     "Cannot rewrite CV: the rewrite module returned no content."
                 )
 
+            change_summary = str(getattr(pred, "change_summary", "") or "").strip()
+            reasoning = str(getattr(pred, "reasoning", "") or "").strip()
+
+            out_head, out_tail = _safe_preview(rewritten)
+            logger.info(
+                "agent_tool rewrite_cv_output candidate_id=%s rewritten_chars=%s head=%r tail=%r",
+                str(candidate_id),
+                len(rewritten),
+                out_head,
+                out_tail,
+            )
+
             title_bits = ["CV draft"]
             if target_school:
                 title_bits.append(f"for {target_school}")
             title = " ".join(title_bits)
+            saved_json = None
             try:
-                await save_artifact(
+                rewrite_cv_ran = True
+                saved_json = await save_artifact(
                     "cv_draft",
                     title,
                     rewritten,
@@ -365,7 +447,27 @@ def build_agent_tools(
                 )
                 status = "persist_failed"
 
-            return rewritten
+            # Return a small UI-friendly payload rather than the full CV body.
+            # The CV itself is persisted and downloadable via the returned URL.
+            payload: dict[str, Any] = {
+                "artifact": {},
+                "change_summary": change_summary,
+                "reasoning": reasoning,
+            }
+            try:
+                parsed = json.loads(saved_json or "") if isinstance(saved_json, str) else {}
+                if isinstance(parsed, dict) and parsed.get("artifact_id") and parsed.get("download_url"):
+                    payload["artifact"] = {
+                        "artifact_id": str(parsed.get("artifact_id") or ""),
+                        "artifact_type": str(parsed.get("artifact_type") or "cv_draft"),
+                        "title": str(parsed.get("title") or title),
+                        "school_name": str(parsed.get("school_name") or (target_school or "")),
+                        "download_url": str(parsed.get("download_url") or ""),
+                    }
+            except Exception:
+                pass
+
+            return json.dumps(payload, ensure_ascii=False)
         finally:
             elapsed_ms = int((time.perf_counter() - start) * 1000)
             logger.info(
@@ -376,10 +478,61 @@ def build_agent_tools(
                 elapsed_ms,
             )
 
+    async def classify_intent(
+        user_message: str,
+        conversation_history: str | list[dict[str, Any]] | None = None,
+    ) -> str:
+        """
+        Classify the user's intent for this turn.
+
+        Returns a JSON string matching the agent-advisor intent contract.
+        On failure (exceptions, invalid JSON), returns the FR-11 QA fallback JSON string.
+        """
+        start = time.perf_counter()
+        try:
+            history_window = _last_n_messages_for_intent(conversation_history, n=10)
+            import os
+
+            dspy_mode = (os.getenv("DSPY_MODE") or "").lower()
+            if dspy_mode == "mock":
+                from app.dspy.intent_classifier import MockIntentClassifier
+
+                raw = MockIntentClassifier().classify_json(
+                    conversation_history=history_window,
+                    user_message=user_message or "",
+                )
+                _ = parse_intent_json(raw)
+                return raw
+
+            from app.dspy.intent_classifier import OpenAIIntentClassifier
+
+            pred = await OpenAIIntentClassifier().aforward(
+                conversation_history=history_window,
+                user_message=user_message or "",
+            )
+            raw = str(getattr(pred, "intent_json", "") or "").strip()
+            # Validate/normalize strictly; fall back to QA on any errors.
+            _ = parse_intent_json(raw)
+            return raw
+        except Exception:
+            logger.exception(
+                "agent_tool classify_intent_failed candidate_id=%s",
+                candidate_id,
+            )
+            return qa_fallback_intent_json()
+        finally:
+            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            logger.info(
+                "agent_tool name=classify_intent user_message_len=%s duration_ms=%s",
+                len(user_message or ""),
+                elapsed_ms,
+            )
+
     return (
         retrieve_candidate_context,
         save_artifact,
         get_full_document,
         rewrite_cv,
+        classify_intent,
     )
 

@@ -101,7 +101,7 @@ class TestGetFullDocumentSuccess:
         with patch(
             "app.dspy.agent_tools.UploadedFileRepository", return_value=fake_repo
         ):
-            (_retrieve, _save, get_full_document, _rewrite), _ = _make_tools(
+            (_retrieve, _save, get_full_document, _rewrite, _classify), _ = _make_tools(
                 session, candidate_id
             )
             result = await get_full_document("cv")
@@ -147,7 +147,7 @@ class TestGetFullDocumentInvalidType:
         with patch(
             "app.dspy.agent_tools.UploadedFileRepository"
         ) as repo_cls:
-            (_retrieve, _save, get_full_document, _rewrite), _ = _make_tools(session)
+            (_retrieve, _save, get_full_document, _rewrite, _classify), _ = _make_tools(session)
             result = await get_full_document(bad_type)
 
         # Exact wording from FR-2, with the caller's argument echoed verbatim.
@@ -174,7 +174,7 @@ class TestGetFullDocumentMissing:
         with patch(
             "app.dspy.agent_tools.UploadedFileRepository", return_value=fake_repo
         ):
-            (_retrieve, _save, get_full_document, _rewrite), _ = _make_tools(MagicMock())
+            (_retrieve, _save, get_full_document, _rewrite, _classify), _ = _make_tools(MagicMock())
             result = await get_full_document(doc_type)
 
         assert result == (
@@ -274,7 +274,7 @@ class TestUploadedFileRepositoryLatestWins:
         with patch(
             "app.dspy.agent_tools.UploadedFileRepository", return_value=fake_repo
         ):
-            (_r, _s, get_full_document, _rc), _ = _make_tools(MagicMock())
+            (_r, _s, get_full_document, _rc, _classify), _ = _make_tools(MagicMock())
             result = await get_full_document("cv")
 
         assert "NEWER_MARKER" in result

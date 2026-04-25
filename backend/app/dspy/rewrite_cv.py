@@ -41,6 +41,8 @@ class RewriteCVSignature(dspy.Signature):
       the life story into the CV body.
     - Use `emphasis` and `school_dossier` to prioritize which source bullets
       to foreground. Never add new bullets that aren't grounded in the source.
+    - Apply `prior_feedback` (bulleted guidance from the advisor conversation)
+      to tone/ordering/emphasis WITHOUT dropping any factual CV content.
 
     Output format (STRICT Markdown, used by the PDF/DOCX renderer):
     - Start with a single H1 line containing ONLY the candidate's full name
@@ -60,8 +62,13 @@ class RewriteCVSignature(dspy.Signature):
     - No H3 or deeper headings. No tables. No horizontal rules. No code
       fences. No HTML tags. No emojis.
 
-    Return the rewritten CV only — no preamble, commentary, or trailing
-    notes.
+    ALSO produce a concise change summary for the advisor UI:
+    - `change_summary`: 5–12 bullet points describing what you changed (structure,
+      wording, emphasis), strictly grounded in the source CV. Mention removals
+      only if you removed placeholders/empty sections per the rules above.
+    - `reasoning`: 3–8 bullets explaining why those edits improve MBA recruiting /
+      admissions readability and fit for `target_school` (if provided). Do not
+      mention model internals.
     """
 
     cv_text: str = dspy.InputField(
@@ -82,9 +89,21 @@ class RewriteCVSignature(dspy.Signature):
     emphasis: str = dspy.InputField(
         desc="Optional hint about what to emphasize (empty string if none)."
     )
+    prior_feedback: str = dspy.InputField(
+        desc=(
+            "Optional curated bullet feedback from recent conversation to apply "
+            "in this rewrite. Empty string if none."
+        )
+    )
 
     rewritten_cv: str = dspy.OutputField(
         desc="The full rewritten CV body, ready to save as a draft."
+    )
+    change_summary: str = dspy.OutputField(
+        desc="Bullet list summarizing changes made to the CV."
+    )
+    reasoning: str = dspy.OutputField(
+        desc="Bullet list explaining why those changes help."
     )
 
 
@@ -103,6 +122,7 @@ class OpenAIRewriteCVModule(dspy.Module):
         school_dossier: str = "",
         target_school: str = "",
         emphasis: str = "",
+        prior_feedback: str = "",
     ) -> dspy.Prediction:
         if not isinstance(cv_text, str) or not cv_text.strip():
             raise ValueError("cv_text is required and must be non-empty")
@@ -113,6 +133,7 @@ class OpenAIRewriteCVModule(dspy.Module):
             school_dossier=school_dossier or "",
             target_school=target_school or "",
             emphasis=emphasis or "",
+            prior_feedback=prior_feedback or "",
         )
 
     async def aforward(  # type: ignore[override]
@@ -123,6 +144,7 @@ class OpenAIRewriteCVModule(dspy.Module):
         school_dossier: str = "",
         target_school: str = "",
         emphasis: str = "",
+        prior_feedback: str = "",
     ) -> dspy.Prediction:
         if not isinstance(cv_text, str) or not cv_text.strip():
             raise ValueError("cv_text is required and must be non-empty")
@@ -133,6 +155,7 @@ class OpenAIRewriteCVModule(dspy.Module):
             school_dossier=school_dossier or "",
             target_school=target_school or "",
             emphasis=emphasis or "",
+            prior_feedback=prior_feedback or "",
         )
 
 
@@ -155,6 +178,7 @@ class MockRewriteCVModule(dspy.Module):
         school_dossier: str = "",
         target_school: str = "",
         emphasis: str = "",
+        prior_feedback: str = "",
     ) -> dspy.Prediction:
         if not isinstance(cv_text, str) or not cv_text.strip():
             raise ValueError("cv_text is required and must be non-empty")
@@ -164,11 +188,26 @@ class MockRewriteCVModule(dspy.Module):
             header_parts.append(f"Target school: {target_school}")
         if emphasis:
             header_parts.append(f"Emphasis: {emphasis}")
+        if prior_feedback:
+            header_parts.append("Prior feedback:")
+            header_parts.append(prior_feedback.strip())
         header = "\n".join(header_parts)
 
         body = cv_text.strip()
         rewritten = f"{header}\n\n{body}"
-        return dspy.Prediction(rewritten_cv=rewritten)
+        change_summary = (
+            "- Preserved the source CV verbatim (mock mode).\n"
+            "- Added a mock header describing target school/emphasis when provided."
+        )
+        reasoning = (
+            "- Mock mode is deterministic to support offline tests.\n"
+            "- The header makes the run parameters visible for debugging."
+        )
+        return dspy.Prediction(
+            rewritten_cv=rewritten,
+            change_summary=change_summary,
+            reasoning=reasoning,
+        )
 
     async def aforward(  # type: ignore[override]
         self,
@@ -178,6 +217,7 @@ class MockRewriteCVModule(dspy.Module):
         school_dossier: str = "",
         target_school: str = "",
         emphasis: str = "",
+        prior_feedback: str = "",
     ) -> dspy.Prediction:
         return self.forward(
             cv_text=cv_text,
@@ -186,4 +226,5 @@ class MockRewriteCVModule(dspy.Module):
             school_dossier=school_dossier,
             target_school=target_school,
             emphasis=emphasis,
+            prior_feedback=prior_feedback,
         )

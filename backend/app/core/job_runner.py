@@ -5,10 +5,11 @@ import concurrent.futures
 import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from enum import StrEnum
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, AsyncIterator
 
 import anyio
 from fastapi import FastAPI
@@ -252,11 +253,16 @@ job_runner = InProcessJobRunner()
 
 
 def attach_job_runner(app: FastAPI) -> None:
-    @app.on_event("startup")
-    async def _startup() -> None:
-        await job_runner.start()
+    previous_lifespan = app.router.lifespan_context
 
-    @app.on_event("shutdown")
-    async def _shutdown() -> None:
-        await job_runner.stop()
+    @asynccontextmanager
+    async def _lifespan(app_: FastAPI) -> AsyncIterator[None]:
+        async with previous_lifespan(app_):
+            await job_runner.start()
+            try:
+                yield
+            finally:
+                await job_runner.stop()
+
+    app.router.lifespan_context = _lifespan
 

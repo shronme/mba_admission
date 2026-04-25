@@ -3,10 +3,10 @@ Tests for FR-6: `build_agent_tools` return arity, advisor module wiring,
 and `MockAgentAdvisorModule`.
 
 Covers TC-038..TC-041 from the `rag-full-document-retrieval` QA plan:
-  - TC-038: `build_agent_tools` returns four callables in the expected order
-  - TC-039: every unpack site uses four callables (grep-based regression)
-  - TC-040: `MockAgentAdvisorModule` accepts the four tools / wiring works
-  - TC-041: `AgentAdvisorModule.react.max_iters == 6` for rewrite trajectory
+  - TC-038: `build_agent_tools` returns five callables in the expected order
+  - TC-039: every unpack site uses five callables (grep-based regression)
+  - TC-040: `MockAgentAdvisorModule` accepts the five tools / wiring works
+  - TC-041: `AgentAdvisorModule.react.max_iters == 8` for rewrite trajectory
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ class TestBuildAgentToolsArity:
 
         tools = build_agent_tools(session, candidate_id, openai_client)
         assert isinstance(tools, tuple)
-        assert len(tools) == 4, f"expected 4 tools, got {len(tools)}"
+        assert len(tools) == 5, f"expected 5 tools, got {len(tools)}"
         for t in tools:
             assert callable(t), f"tool {t!r} must be callable"
 
@@ -50,6 +50,7 @@ class TestBuildAgentToolsArity:
             "save_artifact",
             "get_full_document",
             "rewrite_cv",
+            "classify_intent",
         ], f"tool order mismatch: {names}"
 
 
@@ -98,10 +99,10 @@ class TestNoStaleUnpackSites:
                 # at the LHS.
                 if any(n.startswith("*") for n in names):
                     continue
-                if len(names) in (2, 3):
+                if len(names) in (2, 3, 4):
                     hits.append((py.relative_to(backend_root), i, stripped))
         assert not hits, (
-            "Stale build_agent_tools unpacks detected (expected 4 callables): "
+            "Stale build_agent_tools unpacks detected (expected 5 callables): "
             f"{hits}"
         )
 
@@ -114,7 +115,7 @@ class TestMockAgentAdvisorModule:
         module = MockAgentAdvisorModule()
         assert isinstance(module, dspy.Module)
 
-    def test_constructs_with_all_four_tool_kwargs(self) -> None:
+    def test_constructs_with_all_five_tool_kwargs(self) -> None:
         async def fake_retrieve(*_a, **_kw) -> str:
             return ""
 
@@ -129,15 +130,19 @@ class TestMockAgentAdvisorModule:
         async def fake_rewrite(*_a, **_kw) -> str:
             return ""
 
+        async def fake_classify(*_a, **_kw) -> str:
+            return "{}"
+
         module = MockAgentAdvisorModule(
             retrieve_fn=fake_retrieve,
             save_fn=fake_save,
             get_full_document_fn=fake_get_doc,
             rewrite_cv_fn=fake_rewrite,
+            classify_intent_fn=fake_classify,
         )
         assert module is not None
 
-    def test_mock_init_accepts_four_tool_kwargs(self) -> None:
+    def test_mock_init_accepts_five_tool_kwargs(self) -> None:
         sig = inspect.signature(MockAgentAdvisorModule.__init__)
         params = [p for p in sig.parameters.keys() if p != "self"]
         assert set(params) == {
@@ -145,6 +150,7 @@ class TestMockAgentAdvisorModule:
             "save_fn",
             "get_full_document_fn",
             "rewrite_cv_fn",
+            "classify_intent_fn",
         }, f"unexpected MockAgentAdvisorModule init params: {params}"
 
     @pytest.mark.asyncio
@@ -170,17 +176,18 @@ class TestAgentAdvisorMaxIters:
         _fn.__name__ = name
         return _fn
 
-    def test_react_has_four_tools_and_max_iters_6(self) -> None:
+    def test_react_has_five_tools_and_max_iters_8(self) -> None:
         module = AgentAdvisorModule(
             retrieve_fn=self._noop_async_tool("retrieve_candidate_context"),
             save_artifact_fn=self._noop_async_tool("save_artifact"),
             get_full_document_fn=self._noop_async_tool("get_full_document"),
             rewrite_cv_fn=self._noop_async_tool("rewrite_cv"),
+            classify_intent_fn=self._noop_async_tool("classify_intent"),
         )
         assert isinstance(module.react, dspy.ReAct)
-        assert getattr(module.react, "max_iters", None) == 6
+        assert getattr(module.react, "max_iters", None) == 8
 
-    def test_constructor_accepts_exactly_four_tool_kwargs(self) -> None:
+    def test_constructor_accepts_exactly_five_tool_kwargs(self) -> None:
         sig = inspect.signature(AgentAdvisorModule.__init__)
         params = [p for p in sig.parameters.keys() if p != "self"]
         assert set(params) == {
@@ -188,4 +195,5 @@ class TestAgentAdvisorMaxIters:
             "save_artifact_fn",
             "get_full_document_fn",
             "rewrite_cv_fn",
+            "classify_intent_fn",
         }, f"unexpected AgentAdvisorModule init params: {params}"

@@ -22,11 +22,13 @@ class AgentAdvisorSignature(dspy.Signature):
     - `preloaded_document_snippets`: passages from the candidate's documents that
       were already retrieved for you using their latest message as the query. In
       most cases this is all the document context you need — read these before
-      calling any tool. On rewrite/redraft turns this block is the
-      **full** CV (and life story if present), wrapped in tagged blocks like
-      `[CV — full text] ... [End CV]`.
+      calling any tool. These are semantic snippets (top-k passages), not full
+      documents.
 
     TOOLS
+    - `classify_intent(user_message, conversation_history)`: returns a JSON object
+      string with `task_kind`, `target_doc`, `emphasis`, and `prior_feedback`. Call
+      this FIRST on every user turn, then route your behavior based on the result.
     - `retrieve_candidate_context(query)`: returns ranked snippets across all of
       the candidate's uploaded documents. Good for Q&A ("what did they say about
       leadership"). NOT sufficient for rewrites — it may omit sections, formatting,
@@ -36,7 +38,7 @@ class AgentAdvisorSignature(dspy.Signature):
       `life_story`, `recommendation_letter`, `grade_sheet`. Use this when you
       need complete content (e.g. rewriting a CV, grounding an essay in the life
       story) and the preload does not already contain a tagged full-text block.
-    - `rewrite_cv(target_school="", emphasis="")`: produce a rewritten CV and
+    - `rewrite_cv(target_school="", emphasis="", prior_feedback="")`: produce a rewritten CV and
       persist it as a `cv_draft` automatically. Use this when the candidate
       asks you to rewrite / polish / redraft their CV. You do not need to call
       `save_artifact` after it — it persists the draft internally and returns
@@ -46,16 +48,18 @@ class AgentAdvisorSignature(dspy.Signature):
       candidate can download it. Do NOT call it for advice or outlines.
 
     RULES
+    0. On EVERY user turn, call `classify_intent` first. Use the returned JSON to
+       decide what to do next.
     1. NEVER ask the candidate to paste or re-send content that appears in
        `available_documents_json`. If they uploaded a "cv", you already have their
        CV.
-    2. Start by reading `preloaded_document_snippets`. If it already contains what
-       you need, answer directly WITHOUT calling any tool.
+    2. After `classify_intent`, start by reading `preloaded_document_snippets`.
+       If it already contains what you need for a Q&A / smalltalk response, answer
+       directly WITHOUT calling any additional tool.
     3. For rewrite / redraft of a **specific uploaded document** (CV, life story,
        essay), prefer full text — either the tagged full block already in
-       `preloaded_document_snippets`, or a `get_full_document` call. Do NOT rely
-       on `retrieve_candidate_context` alone for those tasks; ranked snippets can
-       omit roles, dates, or education entries.
+       `get_full_document` call. Do NOT rely on `retrieve_candidate_context` alone
+       for those tasks; ranked snippets can omit roles, dates, or education entries.
     4. Only call `retrieve_candidate_context` when `preloaded_document_snippets`
        is insufficient AND you can articulate what specific additional content
        you need. Call it AT MOST ONCE per turn, using a single broad query that
@@ -70,6 +74,8 @@ class AgentAdvisorSignature(dspy.Signature):
     7. When you produce a concrete artifact other than via `rewrite_cv`, persist
        it with `save_artifact` and reference the returned download link in your
        response. `rewrite_cv` already persists internally — do not double-save.
+    8. When `classify_intent.task_kind == "rewrite_cv"`, do NOT paste a full CV
+       in your free-text response. Use `rewrite_cv` + artifact persistence.
 
     Keep responses concise and focused on the next concrete step.
     """
@@ -110,10 +116,11 @@ class AgentAdvisorModule(dspy.Module):
         save_artifact_fn: Callable,
         get_full_document_fn: Callable,
         rewrite_cv_fn: Callable,
+        classify_intent_fn: Callable,
     ) -> None:
         super().__init__()
-        # max_iters=6: allows the full rewrite trajectory (e.g. read preload ->
-        # `get_full_document` for a second doc -> `rewrite_cv` -> final response)
+        # max_iters=8: allows the full rewrite trajectory (e.g. classify_intent ->
+        # `get_full_document` -> `rewrite_cv` -> final response)
         # without timing out. Previous value 4 was tuned to (retrieve +
         # save_artifact + response) and is too tight once `rewrite_cv` can
         # appear in the same turn.
@@ -124,8 +131,9 @@ class AgentAdvisorModule(dspy.Module):
                 save_artifact_fn,
                 get_full_document_fn,
                 rewrite_cv_fn,
+                classify_intent_fn,
             ],
-            max_iters=6,
+            max_iters=8,
         )
 
     def forward(self, **kwargs) -> dspy.Prediction:  # type: ignore[override]
@@ -140,11 +148,11 @@ class MockAgentAdvisorModule(dspy.Module):
     Deterministic stand-in for the real ReAct advisor used when
     `DSPY_MODE=mock`.
 
-    Per FR-6 the mock MUST mirror the four-tool surface of
+    Per FR-6/FR-2 the mock MUST mirror the five-tool surface of
     `AgentAdvisorModule` — `retrieve_candidate_context`, `save_artifact`,
-    `get_full_document`, and `rewrite_cv` — so tests can assert the mock
-    holds the full tool contract even though the trajectory is simulated
-    rather than executed via `dspy.ReAct`.
+    `get_full_document`, `rewrite_cv`, and `classify_intent` — so tests can
+    assert the mock holds the full tool contract even though the trajectory
+    is simulated rather than executed via `dspy.ReAct`.
 
     When constructed with a `save_fn` (the async tool closure built by
     `build_agent_tools`), a CV/essay-flavored turn will actually persist a
@@ -166,13 +174,15 @@ class MockAgentAdvisorModule(dspy.Module):
         | None = None,
         get_full_document_fn: Callable[..., Awaitable[str]] | None = None,
         rewrite_cv_fn: Callable[..., Awaitable[str]] | None = None,
+        classify_intent_fn: Callable[..., Awaitable[str]] | None = None,
     ) -> None:
         super().__init__()
         self._retrieve_fn = retrieve_fn
         self._save_artifact_fn = save_fn
         self._get_full_document_fn = get_full_document_fn
         self._rewrite_cv_fn = rewrite_cv_fn
-        # Expose the full four-tool surface for introspection parity with
+        self._classify_intent_fn = classify_intent_fn
+        # Expose the full five-tool surface for introspection parity with
         # `AgentAdvisorModule.react.tools` (FR-6 / TC-040). Entries may be
         # None when the mock is constructed bare (e.g. legacy unit tests);
         # order matches `build_agent_tools` return tuple.
@@ -181,6 +191,7 @@ class MockAgentAdvisorModule(dspy.Module):
             save_fn,
             get_full_document_fn,
             rewrite_cv_fn,
+            classify_intent_fn,
         ]
 
     def forward(self, user_message: str, **kwargs) -> dspy.Prediction:  # type: ignore[override]
@@ -188,13 +199,15 @@ class MockAgentAdvisorModule(dspy.Module):
         if "cv" in msg:
             return dspy.Prediction(
                 response="[MOCK] Here is your improved CV.",
-                artifact_id="mock-cv-artifact-id",
+                # Keep this parseable as a UUID because some integration tests
+                # hit `/artifacts/{artifact_id}/download` even in mock mode.
+                artifact_id="00000000-0000-0000-0000-000000000001",
                 artifact_type="cv_draft",
             )
         if "essay" in msg:
             return dspy.Prediction(
                 response="[MOCK] Here is your essay feedback.",
-                artifact_id="mock-essay-artifact-id",
+                artifact_id="00000000-0000-0000-0000-000000000002",
                 artifact_type="essay_draft",
             )
         return dspy.Prediction(response="[MOCK] How can I help you?")
@@ -210,7 +223,7 @@ class MockAgentAdvisorModule(dspy.Module):
             )
             return dspy.Prediction(
                 response="[MOCK] Here is your improved CV.",
-                artifact_id=artifact_id or "mock-cv-artifact-id",
+                artifact_id=artifact_id or "00000000-0000-0000-0000-000000000001",
                 artifact_type="cv_draft",
                 download_url=download_url or "",
             )
@@ -223,7 +236,7 @@ class MockAgentAdvisorModule(dspy.Module):
             )
             return dspy.Prediction(
                 response="[MOCK] Here is your essay feedback.",
-                artifact_id=artifact_id or "mock-essay-artifact-id",
+                artifact_id=artifact_id or "00000000-0000-0000-0000-000000000002",
                 artifact_type="essay_draft",
                 download_url=download_url or "",
             )

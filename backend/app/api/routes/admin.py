@@ -203,3 +203,36 @@ async def upload_file_for_candidate(
                 logger.exception("admin_upload task_enqueue_failed file_id=%s", f.id)
 
     return {"files": [_file_to_dto(f) for f in uploaded]}
+
+
+@router.post("/files/{file_id}/reprocess", response_model=None)
+async def reprocess_uploaded_file(
+    file_id: UUID,
+    admin: User = Depends(get_admin_from_bearer_token),
+    session: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """
+    Re-run document processing (text extraction + classification + embeddings)
+    for an existing upload.
+
+    This is useful when extraction logic changes and you want existing rows'
+    `extra["extracted_text"]` to be refreshed without re-uploading the file.
+    """
+    row = await session.get(UploadedFile, file_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    try:
+        job_runner.enqueue(JobType.PROCESS_UPLOADED_DOCUMENT, {"file_id": str(row.id)})
+    except Exception:
+        logger.exception("admin_reprocess task_enqueue_failed file_id=%s", row.id)
+        raise HTTPException(status_code=500, detail="Failed to enqueue reprocess job") from None
+
+    logger.info(
+        "admin_reprocess_file admin_user_id=%s file_id=%s candidate_id=%s filename=%s",
+        admin.id,
+        row.id,
+        row.candidate_id,
+        row.original_filename,
+    )
+    return {"status": "enqueued", "file_id": str(row.id)}

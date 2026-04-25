@@ -66,6 +66,7 @@ class TestMockAgentAdvisorModule:
                 save_fn=_async_dummy_fn,
                 get_full_document_fn=_async_dummy_fn,
                 rewrite_cv_fn=_async_dummy_fn,
+                classify_intent_fn=_async_dummy_fn,
             )
         except ImportError:
             pass
@@ -103,7 +104,7 @@ class TestMockAgentAdvisorModule:
             conversation_history="",
         )
         assert "[MOCK]" in pred.response
-        assert pred.artifact_id == "mock-cv-artifact-id"
+        assert pred.artifact_id == "00000000-0000-0000-0000-000000000001"
         assert pred.artifact_type == "cv_draft"
 
     def test_cv_uppercase_returns_cv_artifact(self) -> None:
@@ -126,7 +127,7 @@ class TestMockAgentAdvisorModule:
             conversation_history="",
         )
         assert pred.artifact_type == "essay_draft"
-        assert pred.artifact_id == "mock-essay-artifact-id"
+        assert pred.artifact_id == "00000000-0000-0000-0000-000000000002"
 
     def test_essay_mixed_case(self) -> None:
         module = self._make_module()
@@ -217,12 +218,11 @@ class TestAgentAdvisorModuleInstantiation:
             save_artifact_fn=_dummy_fn,
             get_full_document_fn=_dummy_fn,
             rewrite_cv_fn=_dummy_fn,
+            classify_intent_fn=_dummy_fn,
         )
         assert hasattr(module, "react"), "module.react must exist"
         assert isinstance(module.react, dspy.ReAct), "module.react must be dspy.ReAct"
-        # max_iters=6: bumped from 4 to allow full rewrite trajectories
-        # (get_full_document + rewrite_cv + final response) to complete.
-        assert getattr(module.react, "max_iters", None) == 6, "max_iters must be 6"
+        assert getattr(module.react, "max_iters", None) == 8, "max_iters must be 8"
         assert hasattr(module, "forward"), "module must expose forward"
         assert hasattr(module, "aforward"), "module must expose aforward"
 
@@ -248,6 +248,7 @@ class TestAgentAdvisorModuleForward:
             save_artifact_fn=_dummy_fn,
             get_full_document_fn=_dummy_fn,
             rewrite_cv_fn=_dummy_fn,
+            classify_intent_fn=_dummy_fn,
         )
         module.react = mock_react
 
@@ -284,6 +285,7 @@ class TestAgentAdvisorModuleAforward:
             save_artifact_fn=_dummy_fn,
             get_full_document_fn=_dummy_fn,
             rewrite_cv_fn=_dummy_fn,
+            classify_intent_fn=_dummy_fn,
         )
         # Replace only the aforward method
         module.react = MagicMock()
@@ -330,7 +332,7 @@ class TestRetrieveCandidateContext:
         mock_search = AsyncMock(return_value=chunks)
 
         with patch("app.dspy.agent_tools.search_async", mock_search):
-            retrieve_fn, _save_fn, _get_full, _rewrite_cv = build_agent_tools(
+            retrieve_fn, _save_fn, _get_full, _rewrite_cv, _classify = build_agent_tools(
                 mock_session, candidate_id, mock_openai
             )
             result = await retrieve_fn("my query")
@@ -410,14 +412,14 @@ class TestSaveArtifactTool:
             candidate_id = uuid.uuid4()
         mock_session = MagicMock()
         mock_openai = MagicMock()
-        _retrieve_fn, save_fn, _get_full_fn, _rewrite_cv_fn = build_agent_tools(
+        _retrieve_fn, save_fn, _get_full_fn, _rewrite_cv_fn, _classify = build_agent_tools(
             mock_session, candidate_id, mock_openai
         )
         return save_fn, mock_session, candidate_id
 
     @pytest.mark.asyncio
     async def test_cv_draft_calls_cv_repository(self) -> None:
-        """TC-010: save_artifact with cv_draft calls CVDraftRepository.create."""
+        """cv_draft is guarded: save_artifact rejects without rewrite_cv."""
         from app.dspy.agent_tools import build_agent_tools
 
         candidate_id = uuid.uuid4()
@@ -432,15 +434,14 @@ class TestSaveArtifactTool:
         mock_openai = MagicMock()
 
         with patch("app.dspy.agent_tools.CVDraftRepository", return_value=mock_repo):
-            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
-            mock_session, candidate_id, mock_openai
-        )
+            _retrieve, save_fn, _get_full, _rewrite_cv, _classify = build_agent_tools(
+                mock_session, candidate_id, mock_openai
+            )
             result = await save_fn("cv_draft", "Wharton CV", "<body>", "Wharton")
 
         parsed = json.loads(result)
-        assert "artifact_id" in parsed
-        assert "download_url" in parsed
-        mock_repo.create.assert_called_once()
+        assert "error" in parsed
+        mock_repo.create.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_essay_draft_creates_row_with_source_agent(self) -> None:
@@ -459,9 +460,9 @@ class TestSaveArtifactTool:
         mock_openai = MagicMock()
 
         with patch("app.dspy.agent_tools.EssayDraftRepository", return_value=mock_repo):
-            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
-            mock_session, candidate_id, mock_openai
-        )
+            _retrieve, save_fn, _get_full, _rewrite_cv, _classify = build_agent_tools(
+                mock_session, candidate_id, mock_openai
+            )
             result = await save_fn("essay_draft", "Booth Essay", "<feedback>", "Booth")
 
         parsed = json.loads(result)
@@ -482,7 +483,7 @@ class TestSaveArtifactTool:
         candidate_id = uuid.uuid4()
         mock_session = MagicMock()
         mock_openai = MagicMock()
-        _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
+        _retrieve, save_fn, _get_full, _rewrite_cv, _classify = build_agent_tools(
             mock_session, candidate_id, mock_openai
         )
 
@@ -511,11 +512,11 @@ class TestSaveArtifactTool:
         mock_openai = MagicMock()
         candidate_id = uuid.uuid4()
 
-        with patch("app.dspy.agent_tools.CVDraftRepository", return_value=mock_repo):
-            _retrieve, save_fn, _get_full, _rewrite_cv = build_agent_tools(
-            mock_session, candidate_id, mock_openai
-        )
-            result = await save_fn("cv_draft", "My CV", "<body>", "MIT")
+        with patch("app.dspy.agent_tools.EssayDraftRepository", return_value=mock_repo):
+            _retrieve, save_fn, _get_full, _rewrite_cv, _classify = build_agent_tools(
+                mock_session, candidate_id, mock_openai
+            )
+            result = await save_fn("essay_draft", "My Essay", "<body>", "MIT")
 
         parsed = json.loads(result)
         url = parsed["download_url"]

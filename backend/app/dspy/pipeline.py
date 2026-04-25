@@ -241,11 +241,12 @@ async def generate_assistant_response(
             save_fn,
             get_full_document_fn,
             rewrite_cv_fn,
+            classify_intent_fn,
         ) = build_agent_tools(session, candidate_id, openai_client)
         dspy_mode = (os.getenv("DSPY_MODE") or "").lower()
-        # Pass all four tool closures into both advisor modules. The real
+        # Pass all five tool closures into both advisor modules. The real
         # `AgentAdvisorModule` wires them into `dspy.ReAct`; the mock holds
-        # them on `self.tools` to satisfy FR-6 four-tool parity and still
+        # them on `self.tools` to satisfy FR-6 five-tool parity and still
         # uses `save_fn` so CV/essay turns persist real artifact rows whose
         # UUIDs pass the `/artifacts/{id}/download` validator.
         module = (
@@ -254,6 +255,7 @@ async def generate_assistant_response(
                 save_fn=save_fn,
                 get_full_document_fn=get_full_document_fn,
                 rewrite_cv_fn=rewrite_cv_fn,
+                classify_intent_fn=classify_intent_fn,
             )
             if dspy_mode == "mock"
             else AgentAdvisorModule(
@@ -261,6 +263,7 @@ async def generate_assistant_response(
                 save_fn,
                 get_full_document_fn,
                 rewrite_cv_fn,
+                classify_intent_fn,
             )
         )
 
@@ -275,25 +278,13 @@ async def generate_assistant_response(
         history = "\n".join(lines)
 
         # Pre-format doc snippets so the agent can usually answer without any
-        # retrieval tool call (the snippets were already fetched via pgvector
-        # in the chat route using `user_message` as the query).
-        #
-        # Two preload shapes are supported:
-        #   1) Full-document (FR-4): each snippet is a tagged block starting
-        #      with `[CV — full text]` or `[Life story — full text]`. Join
-        #      with `\n\n` WITHOUT numeric prefixes so the model sees the tag
-        #      format verbatim.
-        #   2) Semantic top-k (legacy): snippets are bare chunk bodies and
-        #      are numbered `[1] ... [2] ...` as today.
+        # retrieval tool call (snippets were fetched in the chat route using
+        # `user_message` as the query). These are semantic snippets (top-k),
+        # not full-document preloads.
         if docs_snippets:
-            first = docs_snippets[0] if isinstance(docs_snippets[0], str) else ""
-            is_full_doc_preload = first.startswith("[") and "— full text]" in first
-            if is_full_doc_preload:
-                preloaded_snippets_text = "\n\n".join(docs_snippets)
-            else:
-                preloaded_snippets_text = "\n\n".join(
-                    f"[{i + 1}] {snippet}" for i, snippet in enumerate(docs_snippets)
-                )
+            preloaded_snippets_text = "\n\n".join(
+                f"[{i + 1}] {snippet}" for i, snippet in enumerate(docs_snippets)
+            )
         else:
             preloaded_snippets_text = "No snippets pre-loaded."
 

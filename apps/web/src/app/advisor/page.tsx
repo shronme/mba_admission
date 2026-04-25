@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { CandidateStitchShell, candidateInitials } from "@/components/CandidateStitchShell";
+import { AdvisorDocumentsPanel } from "@/components/AdvisorDocumentsPanel";
 import { StreamingChat } from "@/components/StreamingChat";
 import type { CandidateDto } from "@/lib/api";
 import { createAdvisorThread, fetchCandidateProfile, getApiBaseUrl } from "@/lib/api";
@@ -215,7 +216,7 @@ function AdvisorPageInner() {
           </div>
 
           {/* Desktop sidebar: schools + advisor status + new conversation */}
-          <aside className="hidden w-64 shrink-0 flex-col gap-4 lg:flex xl:w-72">
+          <aside className="hidden w-[22rem] shrink-0 flex-col gap-4 lg:flex xl:w-[26rem]">
             <div className="flex items-center gap-2 rounded-full bg-surface-low px-3 py-2">
               <span className="relative flex h-2 w-2">
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
@@ -255,6 +256,8 @@ function AdvisorPageInner() {
             >
               Start new conversation
             </button>
+
+            <AdvisorDocumentsPanel sessionToken={sessionToken} candidateEmail={candidate.email ?? null} />
           </aside>
         </div>
       </div>

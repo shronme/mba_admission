@@ -6,9 +6,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 
 from app.api.deps.auth import get_candidate_id_from_bearer_token
 from app.core.db import get_db_session
+from app.db.models.cv_draft import CVDraft
+from app.db.models.essay import EssayDraft
 from app.repositories.cv_draft_repository import CVDraftRepository
 from app.repositories.essay_draft_repository import EssayDraftRepository
 
@@ -103,6 +106,71 @@ def _render_markdown_to_docx(doc, body: str) -> None:
     flush_paragraph()
 
 
+@router.get("", response_model=None)
+async def list_artifacts(
+    limit: int = Query(default=50, ge=1, le=200),
+    candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
+    session=Depends(get_db_session),
+) -> dict:
+    """
+    List system-generated artifacts for the signed-in candidate.
+
+    Returns both CV drafts and essay drafts in a single list so the frontend can
+    present a unified "System generated docs" section.
+    """
+    cv_rows = (
+        (
+            await session.execute(
+                select(CVDraft)
+                .where(CVDraft.candidate_id == candidate_id)
+                .order_by(CVDraft.created_at.desc())
+                .limit(limit),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    essay_rows = (
+        (
+            await session.execute(
+                select(EssayDraft)
+                .where(EssayDraft.candidate_id == candidate_id)
+                .order_by(EssayDraft.created_at.desc())
+                .limit(limit),
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    items: list[dict] = []
+    for r in cv_rows:
+        items.append(
+            {
+                "id": str(r.id),
+                "artifact_type": "cv_draft",
+                "title": r.title,
+                "school_name": r.school_name,
+                "created_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
+                "download_url": f"/artifacts/{r.id}/download",
+            }
+        )
+    for r in essay_rows:
+        items.append(
+            {
+                "id": str(r.id),
+                "artifact_type": "essay_draft",
+                "title": r.title,
+                "school_name": r.school_name,
+                "created_at": r.created_at.isoformat() if getattr(r, "created_at", None) else None,
+                "download_url": f"/artifacts/{r.id}/download",
+            }
+        )
+
+    items.sort(key=lambda x: (x.get("created_at") or ""), reverse=True)
+    return {"artifacts": items[:limit]}
+
+
 @router.get("/{artifact_id}/download", response_model=None)
 async def download_artifact(
     artifact_id: uuid.UUID,
@@ -110,6 +178,10 @@ async def download_artifact(
     candidate_id: uuid.UUID = Depends(get_candidate_id_from_bearer_token),
     session=Depends(get_db_session),
 ) -> StreamingResponse:
+    # Backwards-compatible default: older links omitted `?format=...`.
+    # Default to docx because it preserves structure for CV drafts.
+    if not format:
+        format = "docx"
     if format not in {"docx", "pdf"}:
         raise HTTPException(status_code=400, detail="Invalid format") from None
 

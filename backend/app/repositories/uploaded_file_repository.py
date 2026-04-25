@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -8,6 +9,8 @@ from sqlalchemy import and_, select
 
 from app.db.models.files import UploadedFile
 from app.repositories.base import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -61,6 +64,11 @@ class UploadedFileRepository(BaseRepository):
         result = await self.session.execute(stmt)
         row = result.scalar_one_or_none()
         if row is None:
+            logger.info(
+                "full_doc_lookup candidate_id=%s document_type=%s result=missing_row",
+                str(candidate_id),
+                document_type,
+            )
             return None
 
         extra = row.extra or {}
@@ -69,12 +77,26 @@ class UploadedFileRepository(BaseRepository):
             # Defensive: SQL filter should already preclude this, but guard
             # against rows where JSONB contains an empty/whitespace string
             # that slipped past the `<> ''` check on some backends.
+            logger.info(
+                "full_doc_lookup candidate_id=%s document_type=%s result=missing_text filename=%s",
+                str(candidate_id),
+                document_type,
+                getattr(row, "original_filename", "") or "",
+            )
             return None
 
         doc_type_val = (
             row.document_type.value
             if hasattr(row.document_type, "value")
             else str(row.document_type)
+        )
+        logger.info(
+            "full_doc_lookup candidate_id=%s document_type=%s result=ok filename=%s extracted_chars=%s created_at=%s",
+            str(candidate_id),
+            doc_type_val,
+            row.original_filename,
+            len(text),
+            getattr(row, "created_at", None),
         )
         return FullDoc(
             filename=row.original_filename,

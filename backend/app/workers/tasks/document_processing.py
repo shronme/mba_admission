@@ -19,6 +19,7 @@ import logging
 import os
 import uuid
 import zipfile
+import re
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -64,6 +65,106 @@ _EXTRACT_PROMPT = (
     "Preserve structure (headings, bullet points, sections). "
     "Return only the extracted text — no commentary or explanation."
 )
+
+
+def _docx_plain_text(*, data: bytes, filename: str) -> str | None:
+    """
+    Extract text from DOCX bytes without an LLM.
+
+    We prefer this over prompting the raw XML because:
+    - it avoids truncating the XML (which would drop later CV sections)
+    - it preserves all paragraphs deterministically
+    """
+    def _docx_xml_text() -> str | None:
+        """
+        Zip-level fallback: extract all visible text runs from Word XML.
+
+        Important: many CV templates use text boxes / shapes that `python-docx`
+        won't surface via `Document(...).paragraphs`. Those still appear in
+        the underlying XML as `<w:t>...</w:t>` runs, often inside `<w:txbxContent>`.
+        """
+        try:
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                # Collect across main doc + headers/footers (some CVs place contact info there).
+                xml_names = [
+                    n
+                    for n in zf.namelist()
+                    if n.startswith("word/")
+                    and n.endswith(".xml")
+                    and (
+                        n == "word/document.xml"
+                        or n.startswith("word/header")
+                        or n.startswith("word/footer")
+                    )
+                ]
+                if not xml_names:
+                    return None
+
+                parts: list[str] = []
+                # Very lightweight conversion:
+                # - turn paragraph boundaries into newlines
+                # - extract text runs
+                for name in xml_names:
+                    try:
+                        xml = zf.read(name).decode("utf-8", errors="ignore")
+                    except Exception:
+                        continue
+                    xml = re.sub(r"</w:p\s*>", "\n", xml)
+                    # Capture text runs; Word sometimes uses xml:space="preserve".
+                    runs = re.findall(r"<w:t[^>]*>(.*?)</w:t>", xml, flags=re.DOTALL)
+                    if not runs:
+                        continue
+                    text = "".join(runs)
+                    text = re.sub(r"\s+\n", "\n", text)
+                    parts.append(text)
+
+                joined = "\n".join(parts)
+                # Unescape common entities produced in WordprocessingML.
+                joined = (
+                    joined.replace("&amp;", "&")
+                    .replace("&lt;", "<")
+                    .replace("&gt;", ">")
+                    .replace("&quot;", '"')
+                    .replace("&apos;", "'")
+                )
+                cleaned = re.sub(r"[ \t]+", " ", joined)
+                cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+                return cleaned or None
+        except Exception:
+            logger.exception("doc_processing docx_xml_extract_failed filename=%s", filename)
+            return None
+
+    try:
+        from docx import Document
+
+        doc = Document(io.BytesIO(data))
+        parts: list[str] = []
+
+        # Paragraphs
+        for p in doc.paragraphs:
+            t = (p.text or "").strip()
+            if t:
+                parts.append(t)
+
+        # Tables (common for CV layouts)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = []
+                for cell in row.cells:
+                    ct = (cell.text or "").strip()
+                    if ct:
+                        cells.append(ct)
+                if cells:
+                    parts.append(" | ".join(cells))
+
+        text = "\n".join(parts).strip()
+        # If python-docx yields very little (common with text boxes), fall back to XML run extraction.
+        if not text or len(text) < 200:
+            return _docx_xml_text()
+        return text or None
+    except Exception:
+        logger.exception("doc_processing docx_plain_extract_failed filename=%s", filename)
+        return _docx_xml_text()
 
 
 def _pdf_plain_text(*, data: bytes, filename: str) -> str | None:
@@ -141,32 +242,9 @@ def _llm_extract(*, data: bytes, filename: str, content_type: str | None) -> str
         )
         return resp.choices[0].message.content
 
-    # ── DOCX / DOC → unpack XML (binary format, not a media type LLMs accept) ─
+    # ── DOCX / DOC → use deterministic extraction (avoid XML truncation) ──────
     if fn_l.endswith((".docx", ".doc")) or ct_l in _DOCX_MIMES:
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                with zf.open("word/document.xml") as f:
-                    xml_content = f.read().decode("utf-8", errors="ignore")
-        except (KeyError, zipfile.BadZipFile):
-            logger.exception("doc_processing docx_xml_read_failed filename=%s", filename)
-            return None
-
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "This is the raw XML from a Word document (.docx). "
-                        "Extract all human-readable text, ignoring XML tags and metadata. "
-                        "Preserve structure (headings, bullet points). "
-                        "Return only the text:\n\n" + xml_content[:30_000]
-                    ),
-                }
-            ],
-            max_tokens=4096,
-        )
-        return resp.choices[0].message.content
+        return _docx_plain_text(data=data, filename=filename)
 
     # ── Plain text → send directly ────────────────────────────────────────────
     if ct_l.startswith("text/") or fn_l.endswith((".txt", ".md", ".csv")):
@@ -199,18 +277,7 @@ def _code_extract(*, data: bytes, filename: str, content_type: str | None) -> st
         return _pdf_plain_text(data=data, filename=filename)
 
     if fn_l.endswith(".docx") or ct_l in _DOCX_MIMES:
-        try:
-            with zipfile.ZipFile(io.BytesIO(data)) as zf:
-                with zf.open("word/document.xml") as f:
-                    import re
-
-                    xml = f.read().decode("utf-8", errors="ignore")
-                    text = re.sub(r"<[^>]+>", " ", xml)
-                    text = re.sub(r"\s+", " ", text).strip()
-                    return text or None
-        except Exception:
-            logger.exception("doc_processing code_extract docx_failed filename=%s", filename)
-            return None
+        return _docx_plain_text(data=data, filename=filename)
 
     logger.info(
         "doc_processing code_extract unsupported filename=%s content_type=%s",
@@ -230,7 +297,14 @@ def _extract_text(
     api_key = os.getenv("OPENAI_API_KEY")
     extracted: str | None = None
 
-    if api_key:
+    ct_l = (content_type or "").lower()
+    fn_l = filename.lower()
+
+    # DOCX: always prefer deterministic full extraction to avoid dropping tail content.
+    if fn_l.endswith(".docx") or ct_l in _DOCX_MIMES:
+        extracted = _docx_plain_text(data=data, filename=filename)
+
+    if api_key and not extracted:
         try:
             extracted = _llm_extract(data=data, filename=filename, content_type=content_type)
         except Exception:

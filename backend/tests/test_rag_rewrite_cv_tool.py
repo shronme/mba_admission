@@ -159,7 +159,7 @@ async def _build_rewrite(
     with patch(
         "app.dspy.agent_tools.UploadedFileRepository", return_value=repo
     ):
-        retrieve_fn, save_fn, get_full_document, rewrite_cv = build_agent_tools(
+        retrieve_fn, save_fn, get_full_document, rewrite_cv, classify_intent = build_agent_tools(
             session, candidate_id, openai_client
         )
 
@@ -213,16 +213,24 @@ class TestRewriteCvHappyPath:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _retrieve, _save, _get_full, rewrite_cv = build_agent_tools(
+            _retrieve, _save, _get_full, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
-            result = await rewrite_cv(target_school="Wharton", emphasis="impact")
+            result = await rewrite_cv(
+                target_school="Wharton",
+                emphasis="impact",
+                prior_feedback="- Emphasize leadership\n- Quantify outcomes",
+            )
 
-        # Rewrite returned and preserves all structured content (mock path).
+        # Tool returns a JSON payload (artifact + change summary), not the CV body.
         assert isinstance(result, str) and result.strip()
-        assert "JANE DOE" in result
-        assert "Stanford" in result
-        assert "Senior PM" in result
+        payload = json.loads(result)
+        assert isinstance(payload, dict)
+        assert isinstance(payload.get("artifact"), dict)
+        assert payload["artifact"].get("artifact_id")
+        assert payload["artifact"].get("download_url")
+        assert "change_summary" in payload
+        assert "reasoning" in payload
 
         # One cv_draft row persisted.
         cv_draft_repo.create.assert_awaited_once()
@@ -250,7 +258,7 @@ class TestRewriteCvMissingCv:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _retrieve, _save, _get_full, rewrite_cv = build_agent_tools(
+            _retrieve, _save, _get_full, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
             result = await rewrite_cv()
@@ -298,12 +306,13 @@ class TestRewriteCvMissingLifeStory:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _r, _s, _g, rewrite_cv = build_agent_tools(
+            _r, _s, _g, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
             result = await rewrite_cv()
 
-        assert "JANE DOE" in result
+        payload = json.loads(result)
+        assert payload.get("artifact", {}).get("artifact_id")
         cv_draft_repo.create.assert_awaited_once()
 
 
@@ -341,12 +350,14 @@ class TestRewriteCvEmptyProfile:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _r, _s, _g, rewrite_cv = build_agent_tools(
+            _r, _s, _g, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
             result = await rewrite_cv()
 
-        assert isinstance(result, str) and "JANE DOE" in result
+        payload = json.loads(result)
+        assert isinstance(payload, dict)
+        assert payload.get("artifact", {}).get("artifact_id")
         cv_draft_repo.create.assert_awaited_once()
 
 
@@ -387,12 +398,13 @@ class TestRewriteCvUnknownSchool:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _r, _s, _g, rewrite_cv = build_agent_tools(
+            _r, _s, _g, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
             result = await rewrite_cv(target_school="NonexistentSchoolX")
 
-        assert "JANE DOE" in result
+        payload = json.loads(result)
+        assert payload.get("artifact", {}).get("artifact_id")
         # No errors, no exceptions; draft persisted with the given school name.
         cv_draft_repo.create.assert_awaited_once()
         kwargs = cv_draft_repo.create.call_args.kwargs
@@ -435,11 +447,14 @@ class TestRewriteCvBackToBack:
         ), patch(
             "app.dspy.agent_tools.CVDraftRepository", return_value=cv_draft_repo
         ):
-            _r, _s, _g, rewrite_cv = build_agent_tools(
+            _r, _s, _g, rewrite_cv, _classify = build_agent_tools(
                 session, uuid.uuid4(), MagicMock()
             )
             r1 = await rewrite_cv()
             r2 = await rewrite_cv(target_school="Wharton")
 
-        assert "JANE DOE" in r1 and "JANE DOE" in r2
+        p1 = json.loads(r1)
+        p2 = json.loads(r2)
+        assert p1.get("artifact", {}).get("artifact_id")
+        assert p2.get("artifact", {}).get("artifact_id")
         assert cv_draft_repo.create.await_count == 2

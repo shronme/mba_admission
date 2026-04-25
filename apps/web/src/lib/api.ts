@@ -1078,6 +1078,46 @@ export type UploadedFileDto = {
   uploaded_stage?: number | null;
 };
 
+export type ArtifactListItemDto = {
+  id: string;
+  artifact_type: "cv_draft" | "essay_draft" | string;
+  title: string;
+  school_name: string | null;
+  created_at: string | null;
+  download_url: string; // relative URL (prefer `/api/artifacts/...` via rewrite)
+};
+
+export async function listArtifacts(sessionToken: string): Promise<ArtifactListItemDto[]> {
+  const root = getApiBaseUrl();
+  if (!root) throw new Error("NEXT_PUBLIC_API_URL is not set");
+  const url = `${root}/artifacts?limit=50`;
+  return coalesce(inflightKey(["GET", url, sessionToken]), async () => {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    const text = await res.text();
+    let data: unknown;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      throw new Error(`GET /artifacts: invalid JSON (${res.status})`);
+    }
+    if (!res.ok) throw new Error(`GET /artifacts failed: ${res.status} ${text}`);
+    const obj = data as Record<string, unknown>;
+    const rows = Array.isArray(obj.artifacts) ? (obj.artifacts as any[]) : [];
+    return rows.map((r) => ({
+      id: String(r?.id ?? ""),
+      artifact_type: String(r?.artifact_type ?? ""),
+      title: String(r?.title ?? ""),
+      school_name: r?.school_name === null || r?.school_name === undefined ? null : String(r.school_name),
+      created_at: r?.created_at === null || r?.created_at === undefined ? null : String(r.created_at),
+      download_url: String(r?.download_url ?? ""),
+    }));
+  });
+}
+
 export async function listUploadedFiles(sessionToken?: string | null): Promise<
   UploadedFileDto[]
 > {
